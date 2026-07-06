@@ -34,6 +34,19 @@ def convert_network_path(path):
 
 
 
+def get_ip_from_source_root(source_root):
+    if source_root is None:
+        return ""
+
+    text = str(source_root).strip()
+    match = re.search(r"169\.254\.51\.\d+", text)
+
+    if match:
+        return match.group(0)
+
+    return ""
+
+
 def convert_linux_path_to_network_path(path, source_root=""):
     if path is None:
         return path
@@ -42,22 +55,21 @@ def convert_linux_path_to_network_path(path, source_root=""):
     if not path:
         return path
 
-    # 从第一个输入框 source_root 里提取 IP
-    match = re.search(r"169\.254\.51\.\d+", str(source_root))
-    ip = match.group(0) if match else "169.254.51.194"
+    ip = get_ip_from_source_root(source_root)
+
+    # 如果第一个输入框 source_root 里面没有 IP，就不强行转换，直接返回原路径
+    if not ip:
+        return path
 
     # 统一成 Linux 风格，方便判断
     path = path.replace("\\", "/")
 
     linux_prefix = "/media/cangling/EAGET"
-
-    # 按你要的结果：\\169.254.51.194\datadisk\EAGET\...
-    windows_prefix = f"//{ip}/datadisk/EAGET"
+    windows_prefix = f"//{ip}/datadisk"
 
     if path.startswith(linux_prefix):
         path = path.replace(linux_prefix, windows_prefix, 1)
 
-    # 最后转成 Windows 反斜杠
     return path.replace("/", "\\")
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -699,7 +711,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
