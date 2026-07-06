@@ -486,17 +486,17 @@ def build_output_boundary(
 ) -> gpd.GeoDataFrame:
     output = boundary[[COUNTY_NAME_FIELD, COUNTY_CODE_FIELD, "geometry"]].copy()
     metric_fields: list[str] = []
+    rate_fields: list[str] = []
     for code in crop_codes:
         ma_field, iou_field = metric_field_names(code)
+        lr_field, cr_field = csv_rate_field_names(code)
         metric_fields.extend([ma_field, iou_field])
-        if preserve_existing and ma_field in boundary.columns:
-            output[ma_field] = boundary[ma_field]
-        else:
-            output[ma_field] = pd.NA
-        if preserve_existing and iou_field in boundary.columns:
-            output[iou_field] = boundary[iou_field]
-        else:
-            output[iou_field] = pd.NA
+        rate_fields.extend([lr_field, cr_field])
+        for field in (ma_field, iou_field, lr_field, cr_field):
+            if preserve_existing and field in boundary.columns:
+                output[field] = boundary[field]
+            else:
+                output[field] = pd.NA
 
     if preserve_existing and REVIEWER_FIELD in boundary.columns:
         output[REVIEWER_FIELD] = boundary[REVIEWER_FIELD].fillna("").astype(str)
@@ -507,22 +507,28 @@ def build_output_boundary(
     else:
         output[REVIEW_DATE_FIELD] = ""
 
+    numeric_fields = metric_fields + rate_fields
     for index, row in output.iterrows():
         qxdm = non_empty_text(row[COUNTY_CODE_FIELD])
         metrics = county_metrics.get(qxdm)
         if not metrics:
             continue
-        for field in metric_fields:
+        for field in numeric_fields:
             output.at[index, field] = round_metric(metrics.get(field))
         output.at[index, REVIEWER_FIELD] = reviewer[:30]
         output.at[index, REVIEW_DATE_FIELD] = review_date[:30]
 
-    for field in metric_fields:
+    for field in numeric_fields:
         output[field] = pd.to_numeric(output[field], errors="coerce").astype("float64")
     for field in (COUNTY_NAME_FIELD, COUNTY_CODE_FIELD, REVIEWER_FIELD, REVIEW_DATE_FIELD):
         output[field] = output[field].fillna("").astype(str)
-    return output[[COUNTY_NAME_FIELD, COUNTY_CODE_FIELD] + metric_fields + [REVIEWER_FIELD, REVIEW_DATE_FIELD, "geometry"]]
-
+    return output[
+        [COUNTY_NAME_FIELD, COUNTY_CODE_FIELD]
+        + metric_fields
+        + [REVIEWER_FIELD, REVIEW_DATE_FIELD]
+        + rate_fields
+        + ["geometry"]
+    ]
 def output_metric_schema(code: str) -> str:
     return "float:9.2" if crop_code(code) == "107" else "float:8.2"
 
@@ -532,14 +538,18 @@ def output_schema(crop_codes: list[str]) -> dict[str, object]:
         COUNTY_NAME_FIELD: "str:30",
         COUNTY_CODE_FIELD: "str:6",
     }
+    rate_properties: dict[str, str] = {}
     for code in crop_codes:
         ma_field, iou_field = metric_field_names(code)
+        lr_field, cr_field = csv_rate_field_names(code)
         properties[ma_field] = output_metric_schema(code)
         properties[iou_field] = output_metric_schema(code)
+        rate_properties[lr_field] = output_metric_schema(code)
+        rate_properties[cr_field] = output_metric_schema(code)
     properties[REVIEWER_FIELD] = "str:30"
     properties[REVIEW_DATE_FIELD] = "str:30"
+    properties.update(rate_properties)
     return {"geometry": "Polygon", "properties": properties}
-
 
 def remove_existing_shp(path: Path) -> None:
     stem = path.stem
@@ -692,6 +702,8 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"[错误] {exc}", file=sys.stderr)
         raise SystemExit(1)
+
+
 
 
 
