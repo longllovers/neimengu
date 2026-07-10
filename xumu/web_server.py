@@ -25,11 +25,11 @@ def convert_network_path(path):
     path = path.replace("\\", "/")
     windows_prefix_list = []
     for i in range(1, 256):
-        windows_prefix_list.append(f"//169.254.51.{i}/eaget-1")
-        windows_prefix_list.append(f"/169.254.51.{i}/eaget-1")
-        windows_prefix_list.append(f"169.254.51.{i}/eaget-1")
+        windows_prefix_list.append(f"//169.254.51.{i}/datadisk2")
+        windows_prefix_list.append(f"/169.254.51.{i}/datadisk2")
+        windows_prefix_list.append(f"169.254.51.{i}/datadisk2")
 
-    linux_prefix = "/media/cangling/eaget_1_folder"
+    linux_prefix = "/media/cangling/EAGET"
     for windows_prefix in windows_prefix_list:
         if path.startswith(windows_prefix):
             return path.replace(windows_prefix, linux_prefix, 1)

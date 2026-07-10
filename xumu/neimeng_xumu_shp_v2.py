@@ -122,6 +122,66 @@ def get_col_name(df, keywords):
     return None
 
 
+def is_blank_cell(value):
+    text = "" if value is None else str(value).strip()
+    return text == "" or text.lower() in {"nan", "none"}
+
+
+def make_unique_name(name, existing_names):
+    base_name = str(name).strip() if str(name).strip() else "未命名字段"
+    if base_name not in existing_names:
+        return base_name
+
+    index = 2
+    while f"{base_name}_{index}" in existing_names:
+        index += 1
+    return f"{base_name}_{index}"
+
+
+def normalize_excel_table_format(df):
+    """
+    将不同格式的表头归一成普通一行字段表。
+
+    1509 表里同时存在两组“经度/纬度”列，pandas 遇到重复列名时
+    df["经度"] 会返回多列 DataFrame。这里按标准字段名合并重复列：
+    保留第一个非空值，并把无法识别或空列名改成唯一字段名。
+    """
+    import pandas as pd
+
+    if df.empty:
+        return df
+
+    normalized_df = pd.DataFrame(index=df.index)
+    key_to_output_col = {}
+
+    for idx, original_col in enumerate(df.columns):
+        col_name = str(original_col).strip()
+        col_key = normalize_header_text(col_name)
+        series = df.iloc[:, idx]
+
+        is_unnamed = col_key == "" or col_key.startswith("未命名字段") or col_key.startswith("unnamed:")
+        if is_unnamed:
+            output_col = make_unique_name(col_name or f"未命名字段_{idx}", normalized_df.columns)
+            normalized_df[output_col] = series
+            continue
+
+        if col_key in key_to_output_col:
+            output_col = key_to_output_col[col_key]
+            existing = normalized_df[output_col]
+            existing_blank = existing.map(is_blank_cell)
+            normalized_df.loc[existing_blank, output_col] = series.loc[existing_blank]
+            continue
+
+        output_col = make_unique_name(col_name, normalized_df.columns)
+        key_to_output_col[col_key] = output_col
+        normalized_df[output_col] = series
+
+    normalized_df = normalized_df.dropna(how="all").dropna(axis=1, how="all")
+    normalized_df.columns = [str(c).strip() for c in normalized_df.columns]
+
+    return normalized_df
+
+
 def read_excel_with_auto_header(excel_path):
     """
     兼容两类Excel：
@@ -166,7 +226,7 @@ def read_excel_with_auto_header(excel_path):
         df = pd.read_excel(excel_path, sheet_name=selected_sheet, dtype=str)
         df = df.dropna(how="all").dropna(axis=1, how="all")
         df.columns = [str(c).strip() for c in df.columns]
-        return df
+        return normalize_excel_table_format(df)
 
     header1 = raw.iloc[header_row].fillna("").astype(str).tolist()
 
@@ -202,7 +262,8 @@ def read_excel_with_auto_header(excel_path):
     # 清理列名
     df.columns = [str(c).strip() for c in df.columns]
 
-    return df
+    return normalize_excel_table_format(df)
+
 
 def normalize_join_id(series):
     """
