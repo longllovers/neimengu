@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>页面导航</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>页面导航</h1>
+      <p class="subtitle">选择一个入口即可进入</p>
+    </div>
+    <div class="header-actions">
+      <button id="deleteButton" class="global-delete-button" type="button" aria-label="删除页面" title="删除页面">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16M9 7V4h6v3M6.5 7l.8 13h9.4l.8-13M10 11v5M14 11v5"/>
+        </svg>
+      </button>
+      <button id="addButton" class="add-button" type="button" aria-label="添加页面" title="添加页面">＋</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="status" class="status" role="status"></div>
+    <section id="cardGrid" class="card-grid" aria-label="页面入口"></section>
+    <div id="emptyState" class="empty-state" hidden>
+      <span>＋</span>
+      <h2>还没有页面入口</h2>
+      <p>点击右上角加号添加第一个入口。</p>
+    </div>
+  </main>
+
+  <dialog id="editorDialog">
+    <form id="editorForm">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">PAGE SETTINGS</p>
+          <h2 id="dialogTitle">添加页面</h2>
+        </div>
+        <button id="closeButton" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <label>页面名称<input id="nameInput" name="name" maxlength="80" required placeholder="例如：投票界面"></label>
+      <label>页面地址<input id="valueInput" name="value" required placeholder="例如：127.0.0.1:8888"></label>
+      <p class="hint">支持域名、IP 地址以及 http:// 或 https:// 完整地址。</p>
+      <label>帮助内容（选填）<textarea id="helpInput" name="help" maxlength="500" rows="4" placeholder="说明这个页面的用途或使用方法"></textarea></label>
+      <div id="formError" class="form-error" role="alert"></div>
+      <div class="actions">
+        <button id="cancelButton" class="secondary-button" type="button">取消</button>
+        <button id="saveButton" class="primary-button" type="submit">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="deleteDialog">
+    <form id="deleteForm">
+      <div class="dialog-heading">
+        <div>
+          <h2>删除页面</h2>
+        </div>
+        <button id="closeDeleteButton" class="icon-button" type="button" aria-label="关闭">×</button>
+      </div>
+      <label>选择要删除的页面
+        <select id="deleteSelect" required></select>
+      </label>
+      <div id="deleteError" class="form-error" role="alert"></div>
+      <div class="actions">
+        <button id="cancelDeleteButton" class="secondary-button" type="button">取消</button>
+        <button id="confirmDeleteButton" class="danger-button" type="submit">确认删除</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
