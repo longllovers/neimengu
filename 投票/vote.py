@@ -27,13 +27,15 @@ from rasterio.windows import from_bounds
 from shapely.geometry import Point, box
 from shapely.ops import transform
 import argparse
+import json
 
 
 
 # -------------------- CONFIG --------------------
-MIN_BACKGROUND_THRESHOLD = 1.0
+MIN_BACKGROUND_THRESHOLD = 0.5
 CLASS_FIELD = "class"
 NUM_WORKERS = 40
+SHP_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "save.json")
 
 # True:
 #   不删除任何原始矢量面，只新增/更新 class 字段。
@@ -73,7 +75,7 @@ def rasterize_polygons(gdf, transform, width, height, attribute):
     )
 
 
-def vote_by_bincount(cls_map, polygon_id_map, n_polygons):
+def vote_by_bincount(cls_map, polygon_id_map, n_polygons, min_background_threshold=MIN_BACKGROUND_THRESHOLD):
     flat_poly = polygon_id_map.ravel()
     flat_cls = cls_map.ravel()
 
@@ -127,7 +129,7 @@ def vote_by_bincount(cls_map, polygon_id_map, n_polygons):
     nonempty = total_count > 0
     keep[nonempty] = (
         background_count[nonempty] / total_count[nonempty]
-        <= MIN_BACKGROUND_THRESHOLD
+        <= min_background_threshold
     )
     keep &= best_class > 0
 
@@ -165,7 +167,7 @@ def get_pixels_within_polygon(polygon, transform, cls_map):
     return values
 
 
-def fallback_vote_for_missing(gdf, raster_poly_id, window_transform, cls_map):
+def fallback_vote_for_missing(gdf, raster_poly_id, window_transform, cls_map, min_background_threshold=MIN_BACKGROUND_THRESHOLD):
     raster_poly_ids = set(np.unique(raster_poly_id))
     shp_poly_ids = set(gdf["poly_id"].to_numpy())
 
@@ -191,7 +193,7 @@ def fallback_vote_for_missing(gdf, raster_poly_id, window_transform, cls_map):
 
         if (
             np.count_nonzero(pixel_values == 0) / len(pixel_values)
-            > MIN_BACKGROUND_THRESHOLD
+            > min_background_threshold
         ):
             continue
 
@@ -245,7 +247,7 @@ def save_stats_csv(stats, csv_path):
 
 
 def majority_vote_by_polygon(args):
-    shp_path, cls_tif, out_shp_path, keep_all_polygons = args
+    shp_path, cls_tif, out_shp_path, keep_all_polygons, min_background_threshold = args
 
     start_time = time.perf_counter()
     base_name = os.path.basename(shp_path)
@@ -354,6 +356,7 @@ def majority_vote_by_polygon(args):
             cls_map,
             raster_poly_id,
             len(gdf_process),
+            min_background_threshold,
         )
 
         poly_id_to_class.update(
@@ -362,6 +365,7 @@ def majority_vote_by_polygon(args):
                 raster_poly_id,
                 window_transform,
                 cls_map,
+                min_background_threshold,
             )
         )
 
@@ -382,14 +386,6 @@ def majority_vote_by_polygon(args):
 
             gdf_original.to_file(out_shp_path)
             stat["status"] = "DONE_KEEP_ALL"
-
-            print(
-                f"[DONE] {base_name}: keep all polygons, "
-                f"input={stat['input_polygons']}, "
-                f"covered={stat['covered_polygons']}, "
-                f"output={stat['output_polygons']}, "
-                f"crs={original_crs} -> {out_shp_path}"
-            )
 
             return _finish_stat(stat, start_time)
 
@@ -413,12 +409,6 @@ def majority_vote_by_polygon(args):
 
             gdf_out.to_file(out_shp_path)
             stat["status"] = "DONE"
-
-            print(
-                f"[DONE] {base_name}: "
-                f"{stat['output_polygons']} polygons saved, "
-                f"crs={original_crs} -> {out_shp_path}"
-            )
 
             return _finish_stat(stat, start_time)
 
@@ -464,6 +454,71 @@ def _shp_intersects_image(shp_bounds, shp_crs, image_bounds, image_crs):
     return shp_bounds.intersects(image_bounds)
 
 
+def _load_shp_cache(cache_path=SHP_CACHE_PATH):
+    if not os.path.exists(cache_path) or os.path.getsize(cache_path) == 0:
+        return {"version": 1, "directories": {}}
+
+    try:
+        with open(cache_path, "r", encoding="utf-8") as cache_file:
+            cache = json.load(cache_file)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"[WARNING] Cannot read shp cache, rebuilding it: {exc}")
+        return {"version": 1, "directories": {}}
+
+    if not isinstance(cache, dict) or not isinstance(cache.get("directories"), dict):
+        print("[WARNING] Invalid shp cache format, rebuilding it.")
+        return {"version": 1, "directories": {}}
+    return cache
+
+
+def _save_shp_cache(cache, cache_path=SHP_CACHE_PATH):
+    cache_dir = os.path.dirname(os.path.abspath(cache_path))
+    os.makedirs(cache_dir, exist_ok=True)
+    temp_path = f"{cache_path}.tmp.{os.getpid()}"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as cache_file:
+            json.dump(cache, cache_file, ensure_ascii=False, indent=2)
+        os.replace(temp_path, cache_path)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def find_cultivated_land_shapefiles(shp_dir, cache_path=SHP_CACHE_PATH):
+    """优先从 JSON 缓存读取，否则扫描 shp 并写入缓存。"""
+    shp_dir = os.path.abspath(os.path.expanduser(shp_dir))
+    if not os.path.isdir(shp_dir):
+        raise ValueError(f"Shapefile directory does not exist: {shp_dir}")
+
+    # normcase 使 Windows 下同一路径的大小写差异不会重复建立缓存。
+    cache_key = os.path.normcase(os.path.normpath(shp_dir))
+    cache = _load_shp_cache(cache_path)
+    cached_files = cache["directories"].get(cache_key)
+    if isinstance(cached_files, list):
+        print(f"[INFO] Loaded {len(cached_files)} shapefile(s) from cache: {cache_path}")
+        return cached_files
+
+    direct_files = sorted(glob.glob(os.path.join(shp_dir, "*.shp")))
+    if direct_files:
+        shp_files = direct_files
+    else:
+        shp_files = []
+        for root, _, files in os.walk(shp_dir):
+            parts = os.path.normpath(root).split(os.sep)
+            if "耕地矢量" in parts:
+                shp_files.extend(
+                    os.path.join(root, name)
+                    for name in files
+                    if name.lower().endswith(".shp")
+                )
+
+    shp_files = sorted(shp_files)
+    cache["directories"][cache_key] = shp_files
+    _save_shp_cache(cache, cache_path)
+    print(f"[INFO] Saved {len(shp_files)} shapefile(s) to cache: {cache_path}")
+    return sorted(shp_files)
+
+
 def build_tasks(
     shp_dir,
     cls_tif,
@@ -471,6 +526,7 @@ def build_tasks(
     filter_area_path=None,
     keep_all_polygons=True,
     resume=True,
+    min_background_threshold=MIN_BACKGROUND_THRESHOLD,
 ):
     filter_area_geom, filter_area_crs = _load_filter_area(filter_area_path)
 
@@ -480,7 +536,9 @@ def build_tasks(
 
     tasks = []
 
-    for shp_file in glob.glob(os.path.join(shp_dir, "*.shp")):
+    shp_files = find_cultivated_land_shapefiles(shp_dir)
+    print(f"[INFO] Found {len(shp_files)} shapefile(s) under: {shp_dir}")
+    for shp_file in shp_files:
         base_name = os.path.splitext(os.path.basename(shp_file))[0]
         out_shp_path = os.path.join(out_dir, f"{base_name}.shp")
 
@@ -509,7 +567,7 @@ def build_tasks(
             #print(f"[SKIP] {base_name}: out of image range.")
             continue
 
-        tasks.append((shp_file, cls_tif, out_shp_path, keep_all_polygons))
+        tasks.append((shp_file, cls_tif, out_shp_path, keep_all_polygons, min_background_threshold))
 
     return tasks
 
@@ -523,6 +581,7 @@ def run_single_tif(
     filter_area_path=None,
     stats_csv="processing_stats.csv",
     keep_all_polygons=True,
+    min_background_threshold=MIN_BACKGROUND_THRESHOLD,
 ):
     os.makedirs(out_dir, exist_ok=True)
 
@@ -535,31 +594,35 @@ def run_single_tif(
         filter_area_path=filter_area_path,
         keep_all_polygons=keep_all_polygons,
         resume=resume,
+        min_background_threshold=min_background_threshold,
     )
 
     if len(tasks) == 0:
         print("[INFO] No tasks need to be processed.")
         return []
 
-    print(f"[INFO] Total tasks: {len(tasks)}")
-    print(f"[INFO] Parallel: {is_parallel}")
-    print(f"[INFO] NUM_WORKERS: {NUM_WORKERS}")
-    print(f"[INFO] KEEP_ALL_POLYGONS: {keep_all_polygons}")
+    print(
+        f"[INFO] Tasks={len(tasks)}, workers={NUM_WORKERS if is_parallel else 1}, "
+        f"background_threshold={min_background_threshold}"
+    )
 
     stats = []
+    progress_step = max(1, len(tasks) // 10)
 
     if is_parallel:
         with Pool(processes=NUM_WORKERS) as pool:
-            for stat in tqdm(
-                pool.imap_unordered(majority_vote_by_polygon, tasks),
-                total=len(tasks),
-                desc="Processing shapefiles",
+            for processed, stat in enumerate(
+                pool.imap_unordered(majority_vote_by_polygon, tasks), start=1
             ):
                 stats.append(stat)
+                if processed == 1 or processed % progress_step == 0 or processed == len(tasks):
+                    print(f"[PROGRESS] {processed}/{len(tasks)} shapefiles")
     else:
-        for task in tqdm(tasks, desc="Processing shapefiles"):
+        for processed, task in enumerate(tasks, start=1):
             stat = majority_vote_by_polygon(task)
             stats.append(stat)
+            if processed == 1 or processed % progress_step == 0 or processed == len(tasks):
+                print(f"[PROGRESS] {processed}/{len(tasks)} shapefiles")
 
     total_elapsed = time.perf_counter() - total_start
 
@@ -594,18 +657,14 @@ def run_single_tif(
         else 0
     )
 
-    print("\n========== Processing Summary ==========")
-    print(f"Total tasks: {len(stats)}")
-    print(f"DONE tasks: {len(done_stats)}")
-    print(f"Total input polygons: {total_input_polygons}")
-    print(f"Total covered polygons: {total_covered_polygons}")
-    print(f"Total output polygons: {total_output_polygons}")
-    print(f"Total wall time: {total_elapsed:.3f} s")
-    print(f"Average file time: {avg_file_time:.3f} s/file")
-    print(f"Average file speed: {avg_file_speed:.2f} polygons/s/file")
-    print(f"Wall-clock throughput: {wall_speed:.2f} polygons/s")
-    print(f"Stats CSV saved to: {stats_path}")
-    print("========================================\n")
+    error_count = sum(1 for s in stats if s["status"] == "ERROR")
+    print("[SUMMARY] Processing completed")
+    print(f"[SUMMARY] Tasks={len(stats)}, done={len(done_stats)}, errors={error_count}")
+    print(
+        f"[SUMMARY] Polygons: input={total_input_polygons}, "
+        f"covered={total_covered_polygons}, output={total_output_polygons}"
+    )
+    print(f"[SUMMARY] Time={total_elapsed:.3f}s, stats={stats_path}")
 
     return stats
 
@@ -645,6 +704,7 @@ def run(
     filter_area_path=None,
     stats_csv="processing_stats.csv",
     keep_all_polygons=True,
+    min_background_threshold=MIN_BACKGROUND_THRESHOLD,
 ):
     if cls_file_type == "file":
         return run_single_tif(
@@ -656,6 +716,7 @@ def run(
             filter_area_path=filter_area_path,
             stats_csv=stats_csv,
             keep_all_polygons=keep_all_polygons,
+            min_background_threshold=min_background_threshold,
         )
 
     if cls_file_type == "folder":
@@ -669,6 +730,7 @@ def run(
             filter_area_path=filter_area_path,
             stats_csv=stats_csv,
             keep_all_polygons=keep_all_polygons,
+            min_background_threshold=min_background_threshold,
         )
 
     raise ValueError("The data input format is not currently supported.")
@@ -696,10 +758,18 @@ if __name__ == "__main__":
         type=str,
         help="输出结果文件夹路径"
     )
+    parser.add_argument(
+        "--MIN_BACKGROUND_THRESHOLD", type=float, default=0.5,
+        help="地块允许的最大背景像元比例，取值范围 0 到 1，默认 0.5",
+    )
     args = parser.parse_args()
     shp_dir = args.shp_dir
     cls_tif = args.cls_tif
     out_dir = args.out_dir
+    os.makedirs(out_dir, exist_ok=True)
+    min_background_threshold = args.MIN_BACKGROUND_THRESHOLD
+    if not 0.0 <= min_background_threshold <= 1.0:
+        parser.error("--MIN_BACKGROUND_THRESHOLD 必须在 0 到 1 之间")
     
     NUM_WORKERS = 40
 
@@ -713,4 +783,5 @@ if __name__ == "__main__":
         filter_area_path=None,
         stats_csv="vote_processing_stats.csv",
         keep_all_polygons=KEEP_ALL_POLYGONS,
+        min_background_threshold=min_background_threshold,
     )

@@ -270,14 +270,11 @@ def merge_shapefiles(args):
 
     ensure_output_can_be_written(output_path, args.overwrite)
 
-    try:
-        from tqdm import tqdm
-    except ImportError:
-        tqdm = lambda iterable, **_: iterable
-
     gdfs = []
     failed_files = []
-    for path in tqdm(input_files, desc="读取 Shapefile"):
+    progress_step = max(1, len(input_files) // 10)
+    LOGGER.info("开始读取 %s 个 Shapefile", len(input_files))
+    for processed, path in enumerate(input_files, start=1):
         try:
             gdf = gpd.read_file(path, encoding=args.encoding)
             if args.add_source_field:
@@ -285,6 +282,8 @@ def merge_shapefiles(args):
             gdfs.append(gdf)
         except Exception as exc:
             failed_files.append((path, exc))
+        if processed == 1 or processed % progress_step == 0 or processed == len(input_files):
+            LOGGER.info("读取进度：%s/%s", processed, len(input_files))
 
     if failed_files:
         message = "\n".join(f"- {path}: {exc}" for path, exc in failed_files)
