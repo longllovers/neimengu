@@ -64,6 +64,7 @@ DEFAULT_OUTPUT1_PATH = "output1"
 DEFAULT_INPUT2_PATH = "input2"
 DEFAULT_OUTPUT2_PATH = "output2"
 DEFAULT_MIN_BACKGROUND_THRESHOLD = "0.5"
+DEFAULT_MIN_CLASS_AREA_MU = "1.0"
 
 VOTE_SCRIPT = BASE_DIR / "vote.py"
 MERGE_SCRIPT = BASE_DIR / "merge_geodata.py"
@@ -89,6 +90,7 @@ def current_values(form_data):
         "input2_path": form_value(form_data, "input2_path", DEFAULT_INPUT2_PATH),
         "output2_path": form_value(form_data, "output2_path", DEFAULT_OUTPUT2_PATH),
         "min_background_threshold": form_value(form_data, "min_background_threshold", DEFAULT_MIN_BACKGROUND_THRESHOLD),
+        "min_class_area_mu": form_value(form_data, "min_class_area_mu", DEFAULT_MIN_CLASS_AREA_MU),
     }
 
 
@@ -101,6 +103,7 @@ def normalize_values(values):
         "input2_path": convert_network_path(values["input2_path"]),
         "output2_path": convert_network_path(values["output2_path"]),
         "min_background_threshold": values["min_background_threshold"],
+        "min_class_area_mu": values["min_class_area_mu"],
     }
 
 
@@ -326,6 +329,7 @@ def build_html(values, result=None):
         "input2_path": DEFAULT_INPUT2_PATH,
         "output2_path": DEFAULT_OUTPUT2_PATH,
         "min_background_threshold": DEFAULT_MIN_BACKGROUND_THRESHOLD,
+        "min_class_area_mu": DEFAULT_MIN_CLASS_AREA_MU,
     }
 
     vote_status_text = ""
@@ -598,7 +602,7 @@ def build_html(values, result=None):
         <form class="card run-form" method="post" data-status-id="vote_status" onsubmit="return false;">
             <input type="hidden" name="action" value="vote">
             <h2>运行 vote.py</h2>
-            <p class="hint">命令：python vote.py --cls_tif input1_path --out_dir output1_path --shp_dir df_path --MIN_BACKGROUND_THRESHOLD 阈值</p>
+            <p class="hint">命令：python vote.py --cls_tif input1_path --out_dir output1_path --shp_dir df_path --MIN_BACKGROUND_THRESHOLD 阈值 --MIN_CLASS_AREA_MU 亩数阈值</p>
 
             <div class="field">
                 <input id="df_path" type="text" name="df_path"
@@ -624,6 +628,10 @@ def build_html(values, result=None):
                 <div class="field">
                     <label for="min_background_threshold">背景像元比例阈值 <span>默认：{html_escape(defaults["min_background_threshold"])}</span></label>
                     <input id="min_background_threshold" type="number" name="min_background_threshold" min="0" max="1" step="0.01" required value="{html_escape(values["min_background_threshold"])}">
+                </div>
+                <div class="field">
+                    <label for="min_class_area_mu">分类面积保留阈值/亩 <span>默认：{html_escape(defaults["min_class_area_mu"])}</span></label>
+                    <input id="min_class_area_mu" type="number" name="min_class_area_mu" min="0" step="0.01" required value="{html_escape(values["min_class_area_mu"])}">
                 </div>
                 <button class="btn-vote" type="submit">运行 vote.py</button>
             </div>
@@ -793,6 +801,7 @@ class ScriptRunHandler(BaseHTTPRequestHandler):
             "input2_path": DEFAULT_INPUT2_PATH,
             "output2_path": DEFAULT_OUTPUT2_PATH,
             "min_background_threshold": DEFAULT_MIN_BACKGROUND_THRESHOLD,
+            "min_class_area_mu": DEFAULT_MIN_CLASS_AREA_MU,
         }
 
         # 默认值也统一处理一下
@@ -828,6 +837,8 @@ class ScriptRunHandler(BaseHTTPRequestHandler):
                 values["df_path"],
                 "--MIN_BACKGROUND_THRESHOLD",
                 values["min_background_threshold"],
+                "--MIN_CLASS_AREA_MU",
+                values["min_class_area_mu"],
             ]
             result = {"name": "vote.py"}
 

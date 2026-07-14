@@ -33,9 +33,11 @@ import json
 
 # -------------------- CONFIG --------------------
 MIN_BACKGROUND_THRESHOLD = 0.5
+MIN_CLASS_AREA_MU = 1.0
 CLASS_FIELD = "class"
 NUM_WORKERS = 40
 SHP_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "save.json")
+MU_SQUARE_METERS = 666.6666666667
 
 # True:
 #   不删除任何原始矢量面，只新增/更新 class 字段。
@@ -75,7 +77,19 @@ def rasterize_polygons(gdf, transform, width, height, attribute):
     )
 
 
-def vote_by_bincount(cls_map, polygon_id_map, n_polygons, min_background_threshold=MIN_BACKGROUND_THRESHOLD):
+def get_pixel_area_mu(transform):
+    pixel_area_square_meters = abs(transform.a * transform.e - transform.b * transform.d)
+    return pixel_area_square_meters / MU_SQUARE_METERS
+
+
+def vote_by_bincount(
+    cls_map,
+    polygon_id_map,
+    n_polygons,
+    min_background_threshold=MIN_BACKGROUND_THRESHOLD,
+    min_class_area_mu=MIN_CLASS_AREA_MU,
+    pixel_area_mu=0.0,
+):
     flat_poly = polygon_id_map.ravel()
     flat_cls = cls_map.ravel()
 
@@ -127,10 +141,17 @@ def vote_by_bincount(cls_map, polygon_id_map, n_polygons, min_background_thresho
 
     keep = np.zeros(n_polygons + 1, dtype=bool)
     nonempty = total_count > 0
-    keep[nonempty] = (
+    background_ok = np.zeros(n_polygons + 1, dtype=bool)
+    background_ok[nonempty] = (
         background_count[nonempty] / total_count[nonempty]
         <= min_background_threshold
     )
+
+    class_area_ok = np.zeros(n_polygons + 1, dtype=bool)
+    if min_class_area_mu > 0 and pixel_area_mu > 0:
+        class_area_ok = best_count * pixel_area_mu > min_class_area_mu
+
+    keep = background_ok | class_area_ok
     keep &= best_class > 0
 
     return {
@@ -167,7 +188,15 @@ def get_pixels_within_polygon(polygon, transform, cls_map):
     return values
 
 
-def fallback_vote_for_missing(gdf, raster_poly_id, window_transform, cls_map, min_background_threshold=MIN_BACKGROUND_THRESHOLD):
+def fallback_vote_for_missing(
+    gdf,
+    raster_poly_id,
+    window_transform,
+    cls_map,
+    min_background_threshold=MIN_BACKGROUND_THRESHOLD,
+    min_class_area_mu=MIN_CLASS_AREA_MU,
+    pixel_area_mu=0.0,
+):
     raster_poly_ids = set(np.unique(raster_poly_id))
     shp_poly_ids = set(gdf["poly_id"].to_numpy())
 
@@ -191,17 +220,26 @@ def fallback_vote_for_missing(gdf, raster_poly_id, window_transform, cls_map, mi
 
         pixel_values = np.asarray(pixel_values, dtype=np.int32)
 
-        if (
-            np.count_nonzero(pixel_values == 0) / len(pixel_values)
-            > min_background_threshold
-        ):
-            continue
-
         valid_values = pixel_values[pixel_values > 0]
         if len(valid_values) == 0:
             continue
 
-        result[int(poly_id)] = int(np.bincount(valid_values).argmax())
+        value_counts = np.bincount(valid_values)
+        best_class = int(value_counts.argmax())
+        best_count = int(value_counts[best_class])
+
+        background_ratio = np.count_nonzero(pixel_values == 0) / len(pixel_values)
+        background_ok = background_ratio <= min_background_threshold
+        class_area_ok = (
+            min_class_area_mu > 0
+            and pixel_area_mu > 0
+            and best_count * pixel_area_mu > min_class_area_mu
+        )
+
+        if not (background_ok or class_area_ok):
+            continue
+
+        result[int(poly_id)] = best_class
 
     return result
 
@@ -247,7 +285,14 @@ def save_stats_csv(stats, csv_path):
 
 
 def majority_vote_by_polygon(args):
-    shp_path, cls_tif, out_shp_path, keep_all_polygons, min_background_threshold = args
+    (
+        shp_path,
+        cls_tif,
+        out_shp_path,
+        keep_all_polygons,
+        min_background_threshold,
+        min_class_area_mu,
+    ) = args
 
     start_time = time.perf_counter()
     base_name = os.path.basename(shp_path)
@@ -339,6 +384,7 @@ def majority_vote_by_polygon(args):
             return _finish_stat(stat, start_time)
 
         height, width = cls_map.shape
+        pixel_area_mu = get_pixel_area_mu(window_transform)
 
         # 这里 reset_index 只为了让 gdf_process 自己行号干净，不再用于回填
         gdf_process = gdf_process.reset_index(drop=True)
@@ -357,6 +403,8 @@ def majority_vote_by_polygon(args):
             raster_poly_id,
             len(gdf_process),
             min_background_threshold,
+            min_class_area_mu,
+            pixel_area_mu,
         )
 
         poly_id_to_class.update(
@@ -366,6 +414,8 @@ def majority_vote_by_polygon(args):
                 window_transform,
                 cls_map,
                 min_background_threshold,
+                min_class_area_mu,
+                pixel_area_mu,
             )
         )
 
@@ -527,6 +577,7 @@ def build_tasks(
     keep_all_polygons=True,
     resume=True,
     min_background_threshold=MIN_BACKGROUND_THRESHOLD,
+    min_class_area_mu=MIN_CLASS_AREA_MU,
 ):
     filter_area_geom, filter_area_crs = _load_filter_area(filter_area_path)
 
@@ -567,7 +618,14 @@ def build_tasks(
             #print(f"[SKIP] {base_name}: out of image range.")
             continue
 
-        tasks.append((shp_file, cls_tif, out_shp_path, keep_all_polygons, min_background_threshold))
+        tasks.append((
+            shp_file,
+            cls_tif,
+            out_shp_path,
+            keep_all_polygons,
+            min_background_threshold,
+            min_class_area_mu,
+        ))
 
     return tasks
 
@@ -582,6 +640,7 @@ def run_single_tif(
     stats_csv="processing_stats.csv",
     keep_all_polygons=True,
     min_background_threshold=MIN_BACKGROUND_THRESHOLD,
+    min_class_area_mu=MIN_CLASS_AREA_MU,
 ):
     os.makedirs(out_dir, exist_ok=True)
 
@@ -595,6 +654,7 @@ def run_single_tif(
         keep_all_polygons=keep_all_polygons,
         resume=resume,
         min_background_threshold=min_background_threshold,
+        min_class_area_mu=min_class_area_mu,
     )
 
     if len(tasks) == 0:
@@ -603,7 +663,8 @@ def run_single_tif(
 
     print(
         f"[INFO] Tasks={len(tasks)}, workers={NUM_WORKERS if is_parallel else 1}, "
-        f"background_threshold={min_background_threshold}"
+        f"background_threshold={min_background_threshold}, "
+        f"min_class_area_mu={min_class_area_mu}"
     )
 
     stats = []
@@ -705,6 +766,7 @@ def run(
     stats_csv="processing_stats.csv",
     keep_all_polygons=True,
     min_background_threshold=MIN_BACKGROUND_THRESHOLD,
+    min_class_area_mu=MIN_CLASS_AREA_MU,
 ):
     if cls_file_type == "file":
         return run_single_tif(
@@ -717,6 +779,7 @@ def run(
             stats_csv=stats_csv,
             keep_all_polygons=keep_all_polygons,
             min_background_threshold=min_background_threshold,
+            min_class_area_mu=min_class_area_mu,
         )
 
     if cls_file_type == "folder":
@@ -731,6 +794,7 @@ def run(
             stats_csv=stats_csv,
             keep_all_polygons=keep_all_polygons,
             min_background_threshold=min_background_threshold,
+            min_class_area_mu=min_class_area_mu,
         )
 
     raise ValueError("The data input format is not currently supported.")
@@ -762,6 +826,10 @@ if __name__ == "__main__":
         "--MIN_BACKGROUND_THRESHOLD", type=float, default=0.5,
         help="地块允许的最大背景像元比例，取值范围 0 到 1，默认 0.5",
     )
+    parser.add_argument(
+        "--MIN_CLASS_AREA_MU", type=float, default=MIN_CLASS_AREA_MU,
+        help="主分类像元面积大于该亩数时直接保留地块，默认 1.0；设为 0 可关闭该规则",
+    )
     args = parser.parse_args()
     shp_dir = args.shp_dir
     cls_tif = args.cls_tif
@@ -770,6 +838,9 @@ if __name__ == "__main__":
     min_background_threshold = args.MIN_BACKGROUND_THRESHOLD
     if not 0.0 <= min_background_threshold <= 1.0:
         parser.error("--MIN_BACKGROUND_THRESHOLD 必须在 0 到 1 之间")
+    min_class_area_mu = args.MIN_CLASS_AREA_MU
+    if min_class_area_mu < 0:
+        parser.error("--MIN_CLASS_AREA_MU 必须大于等于 0")
     
     NUM_WORKERS = 40
 
@@ -784,4 +855,5 @@ if __name__ == "__main__":
         stats_csv="vote_processing_stats.csv",
         keep_all_polygons=KEEP_ALL_POLYGONS,
         min_background_threshold=min_background_threshold,
+        min_class_area_mu=min_class_area_mu,
     )
