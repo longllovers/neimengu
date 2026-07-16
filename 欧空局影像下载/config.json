@@ -1,0 +1,12 @@
+{
+    "acccounts": [
+        {
+            "id": 1,
+            "username": "email",
+            "password": "password"
+        }
+    ],
+    "city":[
+        "赤峰市"
+    ]
+}
