@@ -13,15 +13,6 @@ from pyproj import CRS
 from shapely.geometry import MultiPolygon, Point, Polygon, box
 from shapely.ops import unary_union
 from shapely.prepared import prep
-import os 
-
-
-os.makedirs("01生成样方", exist_ok=True)
-os.makedirs("02参考真值", exist_ok=True)
-os.makedirs("03测量值", exist_ok=True)
-os.makedirs("04评价精度结果", exist_ok=True)
-
-
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SOURCE_ROOT = BASE_DIR / "00分类结果"
 DEFAULT_OUTPUT_ROOT = BASE_DIR / "01生成样方"
