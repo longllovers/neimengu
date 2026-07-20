@@ -12,18 +12,11 @@ from pyproj import CRS
 from shapely.geometry import MultiPolygon, Point, Polygon, box
 from shapely.ops import unary_union
 from shapely.prepared import prep
-import os 
-
-
-os.makedirs("01生成样方", exist_ok=True)
-os.makedirs("02参考真值", exist_ok=True)
-os.makedirs("03测量值", exist_ok=True)
-os.makedirs("04评价精度结果", exist_ok=True)
 
 
 BASE_DIR = Path(__file__).resolve().parent
+SAMPLE_DIR_NAME = "01生成样本"
 DEFAULT_SOURCE_ROOT = BASE_DIR / "00分类结果"
-DEFAULT_OUTPUT_ROOT = BASE_DIR / "01生成样方"
 NEW_ADMIN_BOUNDARY_PATH = BASE_DIR / "00县边界"
 DEFAULT_CITY_BOUNDARY_PATH = BASE_DIR / "00市边界"
 
@@ -1516,18 +1509,26 @@ def parse_args() -> argparse.Namespace:
         description="按 00县边界 的 area_name 和空间范围，从 00分类结果 的 ZWMC 地物类别生成区县自检样方。"
     )
     parser.add_argument(
+        "--input-root",
+        "--input_root",
+        dest="input_root",
+        type=Path,
+        default=None,
+        help="任务根目录；01生成样本到04精度评价均在此目录下生成。",
+    )
+    parser.add_argument(
         "--source_root",
         type=Path,
         nargs="?",
-        default=DEFAULT_SOURCE_ROOT,
-        help="原始分类矢量根目录，递归查找分类 shp；默认 自检样方/00分类结果。",
+        default=None,
+        help="原始分类矢量根目录；默认为脚本目录/00分类结果。",
     )
     parser.add_argument(
         "--output_root",
         type=Path,
         nargs="?",
-        default=DEFAULT_OUTPUT_ROOT,
-        help="输出根目录，结果按市级文件夹保存；默认 自检样方/01生成样方。",
+        default=None,
+        help="输出根目录，结果按市级文件夹保存；默认 input_root/01生成样本。",
     )
     parser.add_argument("--sample-count", type=int, default=DEFAULT_SAMPLE_COUNT, help="每个区县生成的样方数量。")
     parser.add_argument("--min-distance", type=float, default=DEFAULT_MIN_DISTANCE, help="样点最小间距，单位米。")
@@ -1561,7 +1562,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--field-mapping",
         type=Path,
-        default=DEFAULT_FIELD_MAPPING_PATH,
+        default=None,
         help="可选分类映射 CSV。当前默认优先使用分类矢量 ZWMC 字段；映射 CSV 存在时仍兼容读取。",
     )
     parser.add_argument(
@@ -1578,15 +1579,29 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--city-name", default=None, help="手动指定市级输出文件夹名，例如 常州市。适合输入路径中没有市级目录时使用。")
     parser.add_argument(
+        "--boundary-ref",
+        type=Path,
+        default=NEW_ADMIN_BOUNDARY_PATH,
+        help="县边界 shp 或目录；默认为脚本目录/00县边界。",
+    )
+    parser.add_argument(
         "--city-boundary",
         type=Path,
         default=DEFAULT_CITY_BOUNDARY_PATH,
-        help="市边界 shp 或目录，用于按空间位置给县匹配市名；默认 自检样方/00市边界。",
+        help="市边界 shp 或目录；默认为脚本目录/00市边界。",
     )
     parser.add_argument("--write-points", action="store_true", help="同时输出样方中心点 shp。")
     parser.add_argument("--mode", choices=("skip", "overwrite"), default="skip", help="skip 跳过已有样方；overwrite 重新生成并覆盖。")
     parser.add_argument("--seed", type=int, default=20260606, help="随机种子，保证重复运行结果可复现。")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.input_root is None:
+        if args.output_root is None:
+            parser.error("必须提供 --input-root，或者通过 --output_root 明确指定样本输出目录。")
+        args.input_root = args.output_root.parent
+    args.source_root = args.source_root or DEFAULT_SOURCE_ROOT
+    args.output_root = args.output_root or args.input_root / SAMPLE_DIR_NAME
+    args.field_mapping = args.field_mapping or DEFAULT_FIELD_MAPPING_PATH
+    return args
 
 def get_source_root():
     args = parse_args()
@@ -1617,15 +1632,15 @@ def main() -> None:
     shp_paths = find_input_shps(source_root, args.only_dir_name)
     if not shp_paths:
         raise FileNotFoundError(f"没有找到需要处理的 shp: {source_root}")
-    if not NEW_ADMIN_BOUNDARY_PATH.exists():
-        raise FileNotFoundError(f"新行政边界不存在: {NEW_ADMIN_BOUNDARY_PATH}")
+    if not args.boundary_ref.exists():
+        raise FileNotFoundError(f"新行政边界不存在: {args.boundary_ref}")
 
     print(f"Hard-coded target CRS: {args.resolved_target_crs.name}")
-    print(f"Hard-coded new admin boundary: {NEW_ADMIN_BOUNDARY_PATH}")
+    print(f"Admin boundary: {args.boundary_ref}")
     print(f"City boundary reference: {args.city_boundary}")
     load_start_time = time.perf_counter()
     classification_gdf = load_classification_gdf(shp_paths, args.resolved_target_crs, args.flex_class_mapping)
-    admin_units = load_admin_units(NEW_ADMIN_BOUNDARY_PATH, args.resolved_target_crs, args.city_name, args.city_boundary)
+    admin_units = load_admin_units(args.boundary_ref, args.resolved_target_crs, args.city_name, args.city_boundary)
     city_county_filters, county_filters = parse_boundary_filter_values(args.only_boundary_name)
     if args.failed_log is not None:
         city_county_filters.update(parse_failed_sample_units(args.failed_log))

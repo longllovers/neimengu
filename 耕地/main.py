@@ -128,6 +128,8 @@ JOBS = {
         "returncode": None,
         "output": "",
         "csv_output": "",
+        "source_root": "",
+        "converted_source_root": "",
         "input_root": "",
         "converted_input_root": "",
         "measure_dir": "",
@@ -376,6 +378,8 @@ def run_second_job(source_root, input_root):
         returncode=None,
         output="",
         csv_output="",
+        source_root=source_root,
+        converted_source_root=converted_source_root,
         input_root=input_root,
         converted_input_root=converted_input_root,
         measure_dir=measure_dir,
@@ -434,6 +438,7 @@ def status_payload():
         run2 = dict(JOBS["run2"])
 
     source_root = run1.get("source_root") or ""
+    run2_source_root = run2.get("source_root") or source_root
     run1_results = []
     for path in run1.get("delivery_dirs") or []:
         label = "01生成样本：" if Path(path).name == "01生成样本" else "02参考真值："
@@ -449,7 +454,7 @@ def status_payload():
     ):
         if path:
             run2_results.append(
-                {"label": label, "path": convert_linux_path_to_network_path(path, source_root)}
+                {"label": label, "path": convert_linux_path_to_network_path(path, run2_source_root)}
             )
 
     def public_job(job):
@@ -477,9 +482,11 @@ def page_html(message=""):
         run2 = dict(JOBS["run2"])
 
     raw_source_root = run1.get("source_root") or ""
+    raw_run2_source_root = run2.get("source_root") or raw_source_root
     raw_output_root = run1.get("output_root") or ""
     raw_input_root = run2.get("input_root") or raw_output_root
     source_root = escape(raw_source_root)
+    run2_source_root = escape(raw_run2_source_root)
     output_root = escape(raw_output_root)
     input_root = escape(raw_input_root)
     mode = escape(run1.get("mode") or "skip")
@@ -510,17 +517,17 @@ def page_html(message=""):
     result_dir = run2.get("result_dir") or ""
     result_items = []
     if measure_dir:
-        windows_measure_dir = convert_linux_path_to_network_path(measure_dir, raw_source_root)
+        windows_measure_dir = convert_linux_path_to_network_path(measure_dir, raw_run2_source_root)
         result_items.append(
             "<li><strong>03测量值：</strong></li>" + copyable_item(windows_measure_dir)
         )
     if result_dir:
-        windows_result_dir = convert_linux_path_to_network_path(result_dir, raw_source_root)
+        windows_result_dir = convert_linux_path_to_network_path(result_dir, raw_run2_source_root)
         result_items.append(
             "<li><strong>04精度评价：</strong></li>" + copyable_item(windows_result_dir)
         )
     if csv_output:
-        windows_csv_output = convert_linux_path_to_network_path(csv_output, raw_source_root)
+        windows_csv_output = convert_linux_path_to_network_path(csv_output, raw_run2_source_root)
         result_items.append(
             "<li><strong>args.csv_output：</strong></li>" + copyable_item(windows_csv_output)
         )
@@ -675,8 +682,10 @@ def page_html(message=""):
         <section class="card">
             <h2>运行-2</h2>
             <form id="run2-form" method="post" action="/run2">
-                <label for="input_root">输入文件夹根路径 <span>运行-1 提交后自动填写</span></label>
-                <input id="input_root" name="input_root" value="{input_root}" placeholder="请先运行-1，或手动输入包含 01、02 文件夹的根路径" required>
+                <label for="run2_source_root">source_root <span>可独立填写，运行-1 后自动带入</span></label>
+                <input id="run2_source_root" name="source_root" value="{run2_source_root}" placeholder="请输入原始分类矢量的 Windows 或 Linux 根路径" required>
+                <label for="input_root">任务文件夹根路径 <span>应包含 01生成样本、02参考真值</span></label>
+                <input id="input_root" name="input_root" value="{input_root}" placeholder="请输入人工修改参考真值后的任务根路径" required>
                 <button id="run2-button" class="secondary" type="submit" {run2_disabled}>运行-2</button>
             </form>
             <div class="status-line">状态：<span id="run2-status" class="status {status_class(run2['status'])}">{escape(run2['status'])}</span></div>
@@ -902,7 +911,7 @@ class ScriptPageHandler(BaseHTTPRequestHandler):
                 mode = "skip"
             # 在重定向返回页面前保存，运行-2输入框由服务端直接渲染，不依赖 JS 改写。
             update_job("run1", source_root=source_root, output_root=output_root, mode=mode)
-            update_job("run2", input_root=output_root)
+            update_job("run2", source_root=source_root, input_root=output_root)
             start_background(run_first_job, source_root, output_root, mode)
             self.redirect_home()
             return
@@ -915,16 +924,17 @@ class ScriptPageHandler(BaseHTTPRequestHandler):
                 self.respond_html(page_html("第二步已经在运行中。"))
                 return
             with JOBS_LOCK:
-                source_root = JOBS["run1"].get("converted_source_root") or JOBS["run1"].get("source_root") or ""
+                saved_source_root = JOBS["run2"].get("source_root") or JOBS["run1"].get("source_root") or ""
                 saved_input_root = JOBS["run2"].get("input_root") or JOBS["run1"].get("output_root") or ""
+            source_root = (form.get("source_root", [saved_source_root])[0] or saved_source_root).strip()
             input_root = (form.get("input_root", [saved_input_root])[0] or saved_input_root).strip()
             if not source_root:
-                self.respond_html(page_html("请先在左侧运行一次 01 + 02，让系统记录 source_root。"))
+                self.respond_html(page_html("请输入运行-2的source_root。"))
                 return
             if not input_root:
-                self.respond_html(page_html("请输入运行-2的输入文件夹根路径。"))
+                self.respond_html(page_html("请输入运行-2的input_root。"))
                 return
-            update_job("run2", input_root=input_root)
+            update_job("run2", source_root=source_root, input_root=input_root)
             start_background(run_second_job, source_root, input_root)
             self.redirect_home()
             return

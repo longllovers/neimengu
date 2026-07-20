@@ -27,7 +27,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_TRUTH_ROOT = SCRIPT_DIR / "02参考真值"
 DEFAULT_MEASURE_ROOT = SCRIPT_DIR / "03测量值"
 DEFAULT_BOUNDARY_SHP = SCRIPT_DIR / "00县边界"
-DEFAULT_RESULT_ROOT = SCRIPT_DIR / "04评价精度结果"
+DEFAULT_RESULT_ROOT = SCRIPT_DIR / "04精度评价"
 DEFAULT_BOUNDARY_OUTPUT = DEFAULT_RESULT_ROOT / "精度评价边界.shp"
 DEFAULT_CSV_OUTPUT = DEFAULT_RESULT_ROOT / "精度评价汇总.csv"
 
@@ -53,8 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--truth-root", type=Path, default=DEFAULT_TRUTH_ROOT, help="参考真值样本目录；默认 自检样方/02参考真值。")
     parser.add_argument("--measure-root", type=Path, default=DEFAULT_MEASURE_ROOT, help="测量结果目录；默认 自检样方/03测量值。")
     parser.add_argument("--boundary-shp", type=Path, default=DEFAULT_BOUNDARY_SHP, help="县边界 shp 或目录；默认 自检样方/00县边界。")
-    parser.add_argument("--boundary-output", type=Path, default=DEFAULT_BOUNDARY_OUTPUT, help="边界结果另存路径；默认 自检样方/04评价精度结果/精度评价边界.shp。")
-    parser.add_argument("--csv-output", type=Path, default=DEFAULT_CSV_OUTPUT, help="CSV 汇总输出路径；默认 自检样方/04评价精度结果/精度评价汇总.csv。")
+    parser.add_argument("--boundary-output", type=Path, default=DEFAULT_BOUNDARY_OUTPUT, help="边界结果另存路径；默认 04精度评价/精度评价边界.shp。")
+    parser.add_argument("--csv-output", type=Path, default=DEFAULT_CSV_OUTPUT, help="CSV 汇总输出路径；默认 04精度评价/精度评价汇总.csv。")
     parser.add_argument("--reviewer", default="", help="精度评价人 PJR。")
     parser.add_argument("--review-date", default=date.today().strftime("%Y%m%d"), help="精度评价日期 PJRQ，默认今天。")
     parser.add_argument("--encoding", default="UTF-8", help="写出 Shapefile/CSV 编码，默认 UTF-8。")

@@ -16,15 +16,15 @@ from shapely.prepared import prep
 import os 
 
 
-os.makedirs("01生成样方", exist_ok=True)
+os.makedirs("01生成样本", exist_ok=True)
 os.makedirs("02参考真值", exist_ok=True)
 os.makedirs("03测量值", exist_ok=True)
-os.makedirs("04评价精度结果", exist_ok=True)
+os.makedirs("04精度评价", exist_ok=True)
 
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SOURCE_ROOT = BASE_DIR / "00分类结果"
-DEFAULT_OUTPUT_ROOT = BASE_DIR / "01生成样方"
+DEFAULT_OUTPUT_ROOT = BASE_DIR / "01生成样本"
 NEW_ADMIN_BOUNDARY_PATH = BASE_DIR / "00县边界"
 DEFAULT_CITY_BOUNDARY_PATH = BASE_DIR / "00市边界"
 
@@ -1583,7 +1583,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         nargs="?",
         default=DEFAULT_OUTPUT_ROOT,
-        help="输出根目录，结果按市级文件夹保存；默认 自检样方/01生成样方。",
+        help="输出根目录，结果按市级文件夹保存；默认 自检样方/01生成样本。",
     )
     parser.add_argument("--sample-count", type=int, default=DEFAULT_SAMPLE_COUNT, help="每个区县生成的样方数量。")
     parser.add_argument("--min-distance", type=float, default=DEFAULT_MIN_DISTANCE, help="样点最小间距，单位米。")

@@ -27,7 +27,7 @@ except ImportError:  # Shapely < 2.0
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_RESULT_ROOT = SCRIPT_DIR / "00分类结果"
-DEFAULT_SAMPLE_DIR = SCRIPT_DIR / "01生成样方"
+DEFAULT_SAMPLE_DIR = SCRIPT_DIR / "01生成样本"
 DEFAULT_OUTPUT_ROOT = SCRIPT_DIR
 DEFAULT_BOUNDARY_REF = SCRIPT_DIR / "00县边界"
 DEFAULT_CITY_BOUNDARY_REF = SCRIPT_DIR / "00市边界"
@@ -117,8 +117,21 @@ def parse_args() -> argparse.Namespace:
         description="Fast sample clipping/fill workflow with county code/name from the new boundary layer."
     )
     parser.add_argument("result_root", type=Path, nargs="?", default=DEFAULT_RESULT_ROOT, help="结果矢量根目录，递归查找 .shp；默认 自检样方/00分类结果。")
-    parser.add_argument("--source_root", type=Path, default=None, help="与 01generate_county_samples_by_city.py 的 --source_root 保持一致；传入后覆盖 result_root。")
-    parser.add_argument("sample_dir", type=Path, nargs="?", default=DEFAULT_SAMPLE_DIR, help="样方根目录，递归查找 *_样方.shp；默认 自检样方/01生成样方。")
+    parser.add_argument(
+        "--truth_root",
+        "--truth-root",
+        dest="truth_root",
+        type=Path,
+        default=None,
+        help="原始参考真值根目录；传入后覆盖 result_root。",
+    )
+    parser.add_argument(
+        "--source_root",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument("sample_dir", type=Path, nargs="?", default=DEFAULT_SAMPLE_DIR, help="样本根目录，递归查找 *_样方.shp；默认 01生成样本。")
     parser.add_argument("output_root", type=Path, nargs="?", default=DEFAULT_OUTPUT_ROOT, help="输出根目录；默认 自检样方。")
     parser.add_argument("--boundary-ref", type=Path, default=DEFAULT_BOUNDARY_REF, help="县边界 shp 或目录；默认 自检样方/00县边界。")
     parser.add_argument("--city-boundary-ref", type=Path, default=DEFAULT_CITY_BOUNDARY_REF, help="市边界 shp 或目录；默认 自检样方/00市边界。")
@@ -145,7 +158,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=("skip", "overwrite"), default="skip", help="skip 跳过已有参考真值；overwrite 重新裁剪并覆盖。")
     parser.add_argument("--no-staging", action="store_true", help="只写交付目录，不写中间裁剪结果。")
     args = parser.parse_args()
-    if args.source_root is not None:
+    if args.truth_root is not None:
+        args.result_root = args.truth_root
+    elif args.source_root is not None:
         args.result_root = args.source_root
     return args
 
