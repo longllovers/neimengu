@@ -1,0 +1,31 @@
+{
+  "accounts": [],
+  "city": [],
+  "output_dir": null,
+  "temp_dir": null,
+  "search_cache_file": null,
+  "city_output_dir": null,
+  "country_output_dir": null,
+  "max_active_accounts": null,
+  "cloud_cover": null,
+  "max_workers": null,
+  "bypass_proxy": null,
+  "proxy_pool": {
+    "enabled": null,
+    "random_url": null,
+    "count_url": null
+  },
+  "processing_workers": null,
+  "tif_extraction_workers": null,
+  "explain": {
+    "max_active_accounts": null,
+    "temp_dir": null,
+    "search_cache_file": null,
+    "cloud_cover": null,
+    "max_workers": null,
+    "bypass_proxy": null,
+    "proxy_pool": null,
+    "processing_workers": null,
+    "tif_extraction_workers": null
+  }
+}

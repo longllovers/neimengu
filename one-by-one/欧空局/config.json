@@ -1,0 +1,112 @@
+{
+  "accounts": [
+    {
+      "id": "",
+      "username": "",
+      "password": ""
+    },
+    {
+      "id": "",
+      "username": "",
+      "password": ""
+    },
+    {
+      "id": "",
+      "username": "",
+      "password": ""
+    },
+    {
+      "id": "",
+      "username": "",
+      "password": ""
+    },
+    {
+      "id": "",
+      "username": "",
+      "password": ""
+    }
+  ],
+  "city": [
+    {
+      "name": "",
+      "date_ranges": [
+        {
+          "start_date": "",
+          "end_date": ""
+        }
+      ]
+    },
+    {
+      "name": "",
+      "date_ranges": [
+        {
+          "start_date": "",
+          "end_date": ""
+        }
+      ]
+    },
+    {
+      "name": "",
+      "date_ranges": [
+        {
+          "start_date": "",
+          "end_date": ""
+        }
+      ]
+    },
+    {
+      "name": "",
+      "date_ranges": [
+        {
+          "start_date": "",
+          "end_date": ""
+        }
+      ]
+    },
+    {
+      "name": "",
+      "date_ranges": [
+        {
+          "start_date": "",
+          "end_date": ""
+        }
+      ]
+    },
+    {
+      "name": "",
+      "date_ranges": [
+        {
+          "start_date": "",
+          "end_date": ""
+        }
+      ]
+    }
+  ],
+  "output_dir": "",
+  "temp_dir": "",
+  "search_cache_file": "",
+  "city_output_dir": "",
+  "country_output_dir": "",
+  "max_active_accounts": "",
+  "cloud_cover": "",
+  "max_workers": "",
+  "bypass_proxy": "",
+  "proxy_pool": {
+    "enabled": "",
+    "random_url": "",
+    "count_url": ""
+  },
+  "processing_workers": "",
+  "tif_extraction_workers": "",
+  "explain": {
+    "max_active_accounts": "",
+    "temp_dir": "",
+    "search_cache_file": "",
+    "cloud_cover": "",
+    "max_workers": "",
+    "bypass_proxy": "",
+    "proxy_pool": "",
+    "processing_workers": "",
+    "tif_extraction_workers": ""
+  }
+}

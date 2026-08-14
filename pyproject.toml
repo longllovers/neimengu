@@ -1,0 +1,23 @@
+[project]
+name = "test"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "affine>=3.0.0",
+    "fastapi>=0.141.1",
+    "fiona>=1.10.1",
+    "geopandas>=1.1.4",
+    "matplotlib>=3.11.1",
+    "numpy>=2.5.2",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.5",
+    "pydantic>=2.13.4",
+    "pyproj>=3.7.2",
+    "rasterio>=1.5.1",
+    "shapely>=2.1.2",
+    "tqdm>=4.70.0",
+    "uvicorn[standard]>=0.52.1",
+    "xlrd>=2.0.2",
+]

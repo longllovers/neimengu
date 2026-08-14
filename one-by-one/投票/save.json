@@ -1,0 +1,20 @@
+{
+  "version": "",
+  "built_roots": [],
+  "directories": {
+    "d:\\desktop\\综合\\test_toupiao\\shp": []
+  },
+  "cities": {
+    "d:\\desktop\\综合\\test_toupiao\\shp": {
+      "阿拉善盟": []
+    }
+  },
+  "counties": {
+    "d:\\desktop\\综合\\test_toupiao\\shp": {
+      "阿拉善右旗": []
+    }
+  },
+  "unmatched_boundary_files": {
+    "d:\\desktop\\综合\\test_toupiao\\shp": []
+  }
+}

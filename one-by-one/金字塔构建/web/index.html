@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TIF 金字塔构建台</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div class="eyebrow"><span></span> RASTER WORKBENCH</div>
+        <div class="hero-row">
+          <div>
+            <h1>影像金字塔构建台</h1>
+            <p>先生成全部外部 OVR，再将金字塔写入 TIF；按文件独立处理，任务边界清晰可控。</p>
+          </div>
+          <div id="status" class="status status-idle"><i></i><b>等待任务</b></div>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <form id="task-form" class="panel control-panel">
+          <label class="field field-wide">
+            <span>TIF 文件或文件夹</span>
+            <input name="tifDir" type="text" placeholder="例如 D:\data\images 或 /data/images" autocomplete="off" required>
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>最高金字塔倍数</span>
+              <select name="maxFactor">
+                <option value="2">2 倍</option>
+                <option value="4">4 倍</option>
+                <option value="8">8 倍</option>
+                <option value="16">16 倍</option>
+                <option value="32">32 倍</option>
+                <option value="64">64 倍</option>
+                <option value="128">128 倍</option>
+                <option value="256" selected>256 倍（默认）</option>
+              </select>
+              <small>自动构建 2、4、8…直到所选倍数</small>
+            </label>
+
+            <label class="field">
+              <span>并发数</span>
+              <div class="number-control">
+                <button type="button" data-step="-1" aria-label="减少子进程">−</button>
+                <input name="workers" type="number" min="1" max="64" value="4" required>
+                <button type="button" data-step="1" aria-label="增加子进程">＋</button>
+              </div>
+            </label>
+
+            <label class="field">
+              <span>重采样方式</span>
+              <select name="resampling">
+                <option value="nearest" selected>Nearest · 分类影像</option>
+                <option value="average">Average · 连续影像</option>
+                <option value="bilinear">Bilinear</option>
+                <option value="cubic">Cubic</option>
+                <option value="mode">Mode</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="options">
+            <label><input name="recursive" type="checkbox"><span><b>包含子文件夹</b><small>递归查找 TIF / TIFF</small></span></label>
+            <label><input name="force" type="checkbox"><span><b>强制重新构建</b><small>覆盖已有金字塔</small></span></label>
+            <label><input name="dryRun" type="checkbox"><span><b>仅检查</b><small>展示计划但不写入</small></span></label>
+          </div>
+
+          <div class="sequence" aria-label="构建顺序">
+            <div><b>1</b><span>外部 OVR</span></div><i></i><div><b>2</b><span>内部 TIF</span></div>
+          </div>
+
+          <p id="form-message" class="form-message" role="alert"></p>
+          <button id="run-button" class="run-button" type="submit"><span>开始构建</span><b>→</b></button>
+        </form>
+
+        <section class="panel output-panel">
+          <pre id="console" class="console" aria-live="polite"><span class="placeholder">准备就绪，等待开始构建。</span></pre>
+          <footer class="console-footer"><span><i></i> 实时输出</span><button id="clear-button" class="clear-button" type="button">清空</button></footer>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>遥感测量成果规范检查</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">REMOTE SENSING QA</p>
+        <h1>遥感测量成果规范检查</h1>
+        <p class="subtitle">检查目录组织、文件命名与矢量属性表，并在线预览 PDF 报告。</p>
+      </div>
+      <div class="tab-panel" title="每个浏览器标签页都使用独立任务 ID">
+        <span>当前 ID</span>
+        <code id="tabId">生成中</code>
+      </div>
+    </header>
+
+    <section class="control-card">
+      <form id="checkForm">
+        <label class="path-field">
+          <span>一级成果文件夹路径</span>
+          <textarea id="sourceRoot" rows="2" required
+            placeholder="例如：\\169.254.51.68\data\EL_150000_2026"></textarea>
+          <small id="convertedHint">支持 Windows 网络路径，服务器会自动转换成 Linux 挂载路径。</small>
+        </label>
+        <label class="path-field">
+          <span>结果输出文件夹路径</span>
+          <textarea id="outputRoot" rows="2" required
+            placeholder="输入一级成果文件夹后自动填写，也可以手动修改"></textarea>
+          <small id="outputHint">默认位于一级成果文件夹的上一级，文件夹名为“一级文件夹名_检查结果”。</small>
+        </label>
+
+        <div class="option-grid">
+          <label>
+            <span>GDB 属性表核验</span>
+            <select id="gdbSchema">
+              <option value="5-1">表 5-1</option>
+              <option value="6-1">表 6-1</option>
+            </select>
+          </label>
+          <label>
+            <span>ELJDZPJ 属性表核验</span>
+            <select id="zpjSchema">
+              <option value="5-4">表 5-4</option>
+              <option value="6-3">表 6-3</option>
+            </select>
+          </label>
+          <button id="runButton" class="primary-button" type="submit">
+            <span class="button-dot"></span>
+            <span id="runButtonText">开始运行</span>
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <section class="status-card" aria-live="polite">
+      <div class="status-main">
+        <span id="statusIcon" class="status-icon idle"></span>
+        <div>
+          <p id="statusTitle">等待运行</p>
+          <p id="statusDetail">输入一级成果文件夹路径后点击“开始运行”。</p>
+        </div>
+      </div>
+      <div class="status-meta">
+        <span id="startTime">开始时间：—</span>
+        <span id="finishTime">结束时间：—</span>
+      </div>
+    </section>
+
+    <section class="result-card">
+      <div class="result-header">
+        <div>
+          <p class="eyebrow">PDF REPORT</p>
+          <h2>检查报告</h2>
+          <p id="reportPath" class="report-path">运行完成后将在此显示 PDF。</p>
+        </div>
+        <div class="result-actions">
+          <button id="copyPathButton" class="secondary-button" type="button" disabled>复制 PDF 路径</button>
+          <a id="openPdfButton" class="secondary-button disabled" href="#" target="_blank" rel="noopener">新窗口打开</a>
+        </div>
+      </div>
+      <div id="emptyViewer" class="empty-viewer">
+        <div class="document-mark">PDF</div>
+        <p>报告尚未生成</p>
+        <span>运行完成后，可使用右侧滚动条查看全部 PDF 内容。</span>
+      </div>
+      <iframe id="pdfViewer" class="pdf-viewer" title="检查报告 PDF" hidden></iframe>
+    </section>
+
+    <footer>
+      <span>每个标签页独立运行，标签页之间互不覆盖。</span>
+      <span id="toast" role="status"></span>
+    </footer>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shapefile 检查</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">空间数据检查工具</p>
+        <h1>Shapefile 重叠与面积检查</h1>
+        <p class="subtitle">检查面重叠，并找出面积小于 0.1 亩的要素。</p>
+      </div>
+      <div class="server-state"><span></span>Server</div>
+    </header>
+
+    <section class="panel upload-panel">
+      <div class="section-heading">
+        <div>
+          <h2>1. 添加文件</h2>
+          <p>可一次拖入一套或多套数据。每套数据需要同名的 .shp、.shx、.dbf、.prj 文件。</p>
+        </div>
+        <button id="clearButton" class="button ghost" type="button">清空</button>
+      </div>
+
+      <label id="dropZone" class="drop-zone" for="fileInput">
+        <input id="fileInput" type="file" multiple
+          accept=".shp,.shx,.dbf,.prj,.cpg,.qix,.sbn,.sbx">
+        <span class="drop-icon">＋</span>
+        <strong>拖入 Shapefile 文件</strong>
+        <span>或点击选择文件，支持一次处理多个 Shapefile</span>
+      </label>
+      <div id="fileSummary" class="file-summary empty">尚未添加文件</div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>2. 输出设置</h2>
+          <p>每个结果 CSV 使用对应的 Shapefile 文件名命名，并在 CSV 中记录完整保存路径。</p>
+        </div>
+      </div>
+      <div class="path-row">
+        <label for="outputPath">CSV 保存文件夹</label>
+        <div class="input-action">
+          <input id="outputPath" type="text" spellcheck="false">
+          <button id="copyOutputButton" class="button ghost" type="button">复制</button>
+        </div>
+        <p class="path-help">支持手动填写本机路径或 \\10.10.10.x\共享目录\... 网络路径。</p>
+      </div>
+      <div id="mergePathRow" class="path-row disabled-path">
+        <label for="mergeOutputPath">合并后 SHP 保存文件夹</label>
+        <div class="input-action">
+          <input id="mergeOutputPath" type="text" spellcheck="false" disabled>
+          <button id="copyMergeOutputButton" class="button ghost" type="button" disabled>复制</button>
+        </div>
+        <p class="path-help">网络路径会在服务端自动转换为对应的 Linux 挂载路径。</p>
+      </div>
+      <label class="merge-option">
+        <input id="mergeSmallCheckbox" type="checkbox">
+        <span class="checkmark" aria-hidden="true"></span>
+        <span>
+          <strong>自动合并小于 0.1 亩的面</strong>
+          <small>勾选后可填写上方的 SHP 保存文件夹。小面会合并到相邻最大面积面；没有接触或相交目标的小面将从结果中删除。</small>
+        </span>
+      </label>
+      <button id="runButton" class="button primary" type="button" disabled>
+        开始检查
+      </button>
+      <div id="message" class="message" role="status" aria-live="polite"></div>
+    </section>
+
+    <section id="resultPanel" class="panel result-panel hidden">
+      <div class="section-heading result-heading">
+        <div>
+          <h2>3. 检查结果</h2>
+          <p id="resultSummary"></p>
+        </div>
+        <button id="copyCsvPathButton" class="button ghost" type="button">复制 CSV 路径</button>
+      </div>
+      <div id="resultTabs" class="result-tabs" role="tablist"></div>
+      <div class="csv-path-line">
+        <span>保存位置</span>
+        <code id="csvPath"></code>
+      </div>
+      <div id="modifiedPathBlock" class="modified-path-line hidden">
+        <span>合并后 SHP</span>
+        <code id="modifiedShpPath"></code>
+        <button id="copyModifiedPathButton" class="button ghost compact" type="button">复制</button>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+        <div id="emptyResult" class="empty-result hidden">没有发现符合条件的问题。</div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

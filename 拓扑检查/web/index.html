@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shapefile 拓扑处理</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">空间数据拓扑工具</p>
+        <h1>Shapefile 拓扑检查与处理</h1>
+        <p class="subtitle">检查无效几何；发生面重叠时，相交区域保留在面积最大的要素中。</p>
+      </div>
+      <div class="server-state"><span></span>Server</div>
+    </header>
+
+    <section class="panel upload-panel">
+      <div class="section-heading">
+        <div><h2>1. 添加文件</h2><p>拖入一套同名的 .shp、.shx、.dbf、.prj 文件，路径也可手动修改。</p></div>
+        <button id="clearButton" class="button ghost" type="button">清空</button>
+      </div>
+      <label id="dropZone" class="drop-zone" for="fileInput">
+        <input id="fileInput" type="file" multiple accept=".shp,.shx,.dbf,.prj,.cpg,.qix,.sbn,.sbx">
+        <span class="drop-icon">＋</span><strong>拖入 Shapefile 文件</strong>
+        <span>或点击选择文件，请同时选择配套文件</span>
+      </label>
+      <div id="fileSummary" class="file-summary empty">尚未添加文件</div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading"><div><h2>2. 路径与运行</h2><p>默认保存到 shp 上一级目录的 csv 和 output 文件夹，也可手动修改。</p></div></div>
+      <div class="path-row">
+        <label for="csvOutputPath">CSV 保存文件夹</label>
+        <div class="input-action"><input id="csvOutputPath" type="text" spellcheck="false" placeholder="留空 = shp 所在文件夹"><button id="copyCsvOutputButton" class="button ghost" type="button">复制</button></div>
+        <p class="path-help">可手动修改 CSV 的保存目录。</p>
+      </div>
+      <div class="path-row">
+        <label for="shpOutputPath">处理后 SHP 保存文件夹</label>
+        <div class="input-action"><input id="shpOutputPath" type="text" spellcheck="false" placeholder="留空 = shp 所在文件夹"><button id="copyShpOutputButton" class="button ghost" type="button">复制</button></div>
+        <p class="path-help">可手动修改处理后 Shapefile 的保存目录。</p>
+      </div>
+      <button id="runButton" class="button primary" type="button" disabled>运行</button>
+      <div id="message" class="message" role="status" aria-live="polite">等待运行</div>
+    </section>
+
+    <section id="resultPanel" class="panel result-panel">
+      <div class="section-heading result-heading">
+        <div><h2>3. CSV 检查结果</h2><p id="resultSummary">运行完成后在这里显示 CSV 信息。</p></div>
+        <button id="copyCsvPathButton" class="button ghost hidden" type="button">复制 CSV 路径</button>
+      </div>
+      <div id="resultTabs" class="result-tabs hidden" role="tablist"></div>
+      <div id="csvPathLine" class="csv-path-line hidden"><span>CSV 位置</span><code id="csvPath"></code></div>
+      <div id="shpPathLine" class="modified-path-line hidden"><span>结果 SHP</span><code id="modifiedShpPath"></code><button id="copyModifiedPathButton" class="button ghost compact" type="button">复制</button></div>
+      <div class="table-scroll">
+        <table><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table>
+        <div id="emptyResult" class="empty-result">等待运行</div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

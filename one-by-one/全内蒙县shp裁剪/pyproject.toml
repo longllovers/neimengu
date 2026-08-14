@@ -1,0 +1,7 @@
+[project]
+name = "county-shapefile-clipper"
+version = "0.1.0"
+description = "Recursively index Shapefiles and clip them by county boundaries"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []

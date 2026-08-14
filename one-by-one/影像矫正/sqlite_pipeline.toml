@@ -1,0 +1,85 @@
+# SQLite 影像/SHP 流水线启动配置。
+# 相对路径均以本配置文件所在目录为基准，也可以填写绝对路径。
+
+[mosaic]
+# 必须是直接存放 tif/tiff 的目录；脚本不会递归读取子目录。
+# 城市模式下，这里应填写存放“图幅号_2025.tif”的总影像目录。
+input_dir = ""
+output = ""
+database = ""
+# 城市模式下每个城市使用固定数据库，如 database/乌海市.sqlite；
+# 再次启动时保留数据库，并从其中记录的最新完整阶段继续。
+database_dir = ""
+
+# 按城市处理：既可以写一个城市，也可以写多个城市。
+# 单个城市也可写成 cities = "乌海市"
+# 多个城市示例：cities = ["乌海市", "包头市", "鄂尔多斯市"]
+# 设置为空数组 cities = [] 时，继续使用上面的 output 进行原来的非城市模式。
+cities = ""
+# 0 表示 cities 中填写几个城市，就同时执行几个；也可填写 1、2、3 等上限。
+city_workers = ""
+city_boundary = ""
+tile_index = ""
+city_field = ""
+city_code_field = ""
+tile_field = ""
+image_suffix = ""
+city_output_dir = ""
+
+# 留空时：首次运行自动创建批次；再次运行自动寻找同一输出的未完成批次。
+run_id = ""
+order = ""
+model = ""
+# 统一重投影后的工作网格像元大小，单位为米。
+pixel_size_x = ""
+pixel_size_y = ""
+max_shift = ""
+min_response = ""
+threads = ""
+gdal_cache_mb = ""
+warp_mem_limit_mb = ""
+stripe_rows = ""
+build_overviews = ""
+
+# 建议保持 true。服务器意外停止后，再次执行同一命令会从最新完整阶段继续。
+resume = ""
+# 留空时在最终 TIFF 旁创建“输出名_checkpoint”目录；这里只保存当前
+# 局部写入的回滚窗口，不再保存每一步的完整累计 TIFF。
+checkpoint_dir = ""
+# 固定画布模式不生成完整阶段 TIFF；保留此项是为了兼容原启动配置。
+keep_intermediate = ""
+check_only = ""
+overwrite = ""
+
+[shp]
+# 默认读取数据库中最近完成的批次；如需固定批次，可填写具体 run_id。
+# 非城市兼容模式仍可使用 database；城市模式自动从 database_dir 查找。
+database = ""
+database_dir = ""
+run_id = ""
+# 默认直接沿用 [mosaic] 的 cities；如需临时只处理一个城市，可填写 city。
+city = ""
+# 0 表示 [mosaic].cities 中填写几个城市，就同时执行几个。
+city_workers = ""
+shp_dir = ""
+# 人工修改后的同名分幅 SHP 目录；准备好数据后再填写。
+shp_dir_person = ""
+# 应与上面 mosaic.input_dir 指向同一批原始 TIFF。
+tif_dir = ""
+# 路径和文件名由城市名称自动生成：
+#   模型最终：按市/乌海市/乌海市_模型_市界裁剪.shp
+#   人工最终：按市/乌海市/乌海市_人工_市界裁剪.shp
+#   中间文件名分别包含“模型”和“人工”。
+city_output_dir = ""
+intermediate_dir = ""
+shp_seam_overlap_pixels = ""
+max_gap_pixels = ""
+fix_overlap_pixels = ""
+min_merge_contact_pixels = ""
+fix_script = ""
+# 模型补充人工接缝空隙时，向人工图斑两侧搜索的距离（SHP 坐标单位，通常米）。
+person_gap_search_distance = ""
+# 忽略面积小于该值的模型补充碎片（SHP 坐标单位平方）。
+person_gap_min_area = ""
+check_only = ""
+overwrite = ""

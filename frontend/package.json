@@ -1,0 +1,20 @@
+{
+  "name": null,
+  "private": null,
+  "version": null,
+  "type": null,
+  "scripts": {
+    "dev": null,
+    "build": null,
+    "preview": null
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": null,
+    "lucide-react": null,
+    "vite": null,
+    "react": null,
+    "react-dom": null,
+    "react-router-dom": null
+  },
+  "devDependencies": {}
+}
