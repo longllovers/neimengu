@@ -47,7 +47,7 @@ def collect_tifs(input_dir):
 
 
 def run_child(command, label, suppress_area_summary=False):
-    """静默启动子任务；仅转发业务输出，不显示命令、PID 等运行信息。"""
+    """静默启动子进程；仅转发业务输出，不显示命令、PID 等进程信息。"""
     process = subprocess.Popen(
         command,
         cwd=BASE_DIR,
@@ -77,7 +77,13 @@ def run_child(command, label, suppress_area_summary=False):
         raise RuntimeError(f"{label} 处理失败：\n{details}")
 
 
-def build_tif_command(args, tif_path, job_dir, child_concurrency):
+def build_tif_command(
+    args,
+    tif_path,
+    job_dir,
+    child_concurrency,
+    child_precheck_concurrency,
+):
     command = [
         sys.executable,
         str(REGIONAL_PIPELINE_SCRIPT),
@@ -88,6 +94,8 @@ def build_tif_command(args, tif_path, job_dir, child_concurrency):
         "--output-dir", str(job_dir / "results"),
         "--MIN_BACKGROUND_THRESHOLD", str(args.MIN_BACKGROUND_THRESHOLD),
         "--MIN_CLASS_AREA_MU", str(args.MIN_CLASS_AREA_MU),
+        "--index-concurrency-count", str(args.index_concurrency_count),
+        "--precheck-concurrency-count", str(child_precheck_concurrency),
         "--concurrency-count", str(child_concurrency),
     ]
     if args.multi_class:
@@ -95,13 +103,26 @@ def build_tif_command(args, tif_path, job_dir, child_concurrency):
     return command
 
 
-def process_one_tif(index, total, tif_path, args, child_concurrency):
+def process_one_tif(
+    index,
+    total,
+    tif_path,
+    args,
+    child_concurrency,
+    child_precheck_concurrency,
+):
     job_dir = Path(args.temp_dir) / "tif_jobs" / f"{index:03d}"
     (job_dir / "work").mkdir(parents=True, exist_ok=True)
     (job_dir / "results").mkdir(parents=True, exist_ok=True)
     label = f"TIF {index}/{total}：{tif_path.name}"
     run_child(
-        build_tif_command(args, tif_path, job_dir, child_concurrency),
+        build_tif_command(
+            args,
+            tif_path,
+            job_dir,
+            child_concurrency,
+            child_precheck_concurrency,
+        ),
         label,
         suppress_area_summary=True,
     )
@@ -206,6 +227,8 @@ def parse_args():
     parser.add_argument("--MIN_BACKGROUND_THRESHOLD", type=float, default=0.5)
     parser.add_argument("--MIN_CLASS_AREA_MU", type=float, default=999999999)
     parser.add_argument("--concurrency-count", type=int, default=4)
+    parser.add_argument("--index-concurrency-count", type=int, default=4)
+    parser.add_argument("--precheck-concurrency-count", type=int, default=8)
     parser.add_argument("--multi-class", action="store_true")
     parser.add_argument("--class-mapping", default="")
     return parser.parse_args()
@@ -214,24 +237,42 @@ def parse_args():
 def main():
     args = parse_args()
     if not 1 <= args.concurrency_count <= 96:
-        raise ValueError("并发数必须在 1 到 96 之间。")
+        raise ValueError("投票并发数必须在 1 到 96 之间。")
+    if not 1 <= args.index_concurrency_count <= 96:
+        raise ValueError("索引并发数必须在 1 到 96 之间。")
+    if not 1 <= args.precheck_concurrency_count <= 96:
+        raise ValueError("相交检查并发数必须在 1 到 96 之间。")
     if args.multi_class and not args.class_mapping.strip():
         raise ValueError("启用多分类后必须填写类别映射。")
     tif_files = collect_tifs(args.input_dir)
     Path(args.temp_dir).mkdir(parents=True, exist_ok=True)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-    tif_workers = min(args.concurrency_count, len(tif_files))
+    tif_workers = min(
+        args.concurrency_count,
+        args.precheck_concurrency_count,
+        len(tif_files),
+    )
     child_concurrency = max(1, args.concurrency_count // tif_workers)
+    child_precheck_concurrency = max(
+        1,
+        args.precheck_concurrency_count // tif_workers,
+    )
     print(
         f"[批量任务] 找到 {len(tif_files)} 个 TIF，同时处理 {tif_workers} 个，"
-        f"每个 TIF 内部并发数 {child_concurrency}。",
+        f"每个 TIF 相交检查并发数 {child_precheck_concurrency}，"
+        f"每个 TIF 投票并发数 {child_concurrency}。",
         flush=True,
     )
 
-    # 并发启动各 TIF 前只预检一次索引，避免多个子任务同时创建缓存。
+    # 并发启动各 TIF 前只预检一次索引，避免多个子进程同时创建缓存。
     run_child(
-        [sys.executable, str(VOTE_SCRIPT), "--shp_dir", args.shp_dir, "--ensure-shp-cache-only"],
+        [
+            sys.executable, str(VOTE_SCRIPT),
+            "--shp_dir", args.shp_dir,
+            "--ensure-shp-cache-only",
+            "--index-concurrency-count", str(args.index_concurrency_count),
+        ],
         "索引预检",
     )
 
@@ -246,6 +287,7 @@ def main():
                 tif_path,
                 args,
                 child_concurrency,
+                child_precheck_concurrency,
             ): (index, tif_path)
             for index, tif_path in enumerate(tif_files, start=1)
         }

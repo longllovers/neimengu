@@ -30,7 +30,7 @@ SHAPEFILE_SUFFIXES = (".shp", ".shx", ".dbf", ".prj", ".cpg", ".qix", ".sbn", ".
 
 
 def hidden_subprocess_options():
-    """在 Windows 上启动 Python 子任务时不创建控制台窗口。"""
+    """在 Windows 上启动 Python 子进程时不创建控制台窗口。"""
     if os.name != "nt":
         return {}
     startupinfo = subprocess.STARTUPINFO()
@@ -262,7 +262,7 @@ def promote_shapefile(staged_path, output_path):
         remove_shapefile_components(Path(str(backup_stem) + ".shp"))
 
 
-def process_region(region, args, vote_concurrency):
+def process_region(region, args, vote_concurrency, precheck_concurrency):
     label = region.output_stem
     region_temp = Path(args.temp_dir) / label
     vote_dir = region_temp / "vote"
@@ -274,6 +274,8 @@ def process_region(region, args, vote_concurrency):
         "--region-name", region.name,
         "--MIN_BACKGROUND_THRESHOLD", str(args.MIN_BACKGROUND_THRESHOLD),
         "--MIN_CLASS_AREA_MU", str(args.MIN_CLASS_AREA_MU),
+        "--index-concurrency-count", str(args.index_concurrency_count),
+        "--precheck-concurrency-count", str(precheck_concurrency),
         "--concurrency-count", str(vote_concurrency),
     ]
     if args.multi_class:
@@ -360,6 +362,8 @@ def parse_args():
         default=4,
         help="区域与投票任务共用的总并发数，范围 1 到 96。",
     )
+    parser.add_argument("--index-concurrency-count", type=int, default=4)
+    parser.add_argument("--precheck-concurrency-count", type=int, default=8)
     return parser.parse_args()
 
 
@@ -378,21 +382,41 @@ def main():
     if args.multi_class and not args.class_mapping.strip():
         raise ValueError("启用多分类后必须填写类别映射。")
     if not 1 <= args.concurrency_count <= 96:
-        raise ValueError("并发数必须在 1 到 96 之间。")
+        raise ValueError("投票并发数必须在 1 到 96 之间。")
+    if not 1 <= args.index_concurrency_count <= 96:
+        raise ValueError("索引并发数必须在 1 到 96 之间。")
+    if not 1 <= args.precheck_concurrency_count <= 96:
+        raise ValueError("相交检查并发数必须在 1 到 96 之间。")
     if not Path(args.output_dir).is_dir():
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     regions = select_regions(args.region_name, args.cls_tif)
     print("[需求解析] " + ("已填写市/县，按输入项分别输出" if split_names(args.region_name) else "未填写市/县，按 TIF 范围内全部县输出"), flush=True)
     print(f"[行政区] 共 {len(regions)} 个：" + "；".join(region.output_stem for region in regions), flush=True)
-    # 并发任务启动前先完成/读取索引，保证首次运行只有一个任务写 save.json。
+    # 并发任务启动前先完成/读取 SQLite 索引，避免各区域重复建立索引。
     stream_subprocess(
-        [sys.executable, str(VOTE_SCRIPT), "--shp_dir", args.shp_dir, "--ensure-shp-cache-only"],
+        [
+            sys.executable, str(VOTE_SCRIPT),
+            "--shp_dir", args.shp_dir,
+            "--ensure-shp-cache-only",
+            "--index-concurrency-count", str(args.index_concurrency_count),
+        ],
         "索引预检",
     )
-    active_concurrency = min(args.concurrency_count, len(regions))
+    active_concurrency = min(
+        args.concurrency_count,
+        args.precheck_concurrency_count,
+        len(regions),
+    )
     vote_concurrency = max(1, args.concurrency_count // active_concurrency)
+    precheck_concurrency = max(
+        1,
+        args.precheck_concurrency_count // active_concurrency,
+    )
     print(
-        f"[并发设置] 总并发数={args.concurrency_count}，区域并发数={active_concurrency}，"
+        f"[并发设置] 索引并发数={args.index_concurrency_count}，"
+        f"相交检查总并发数={args.precheck_concurrency_count}，"
+        f"投票总并发数={args.concurrency_count}，区域并发数={active_concurrency}，"
+        f"单区域相交检查并发数={precheck_concurrency}，"
         f"单区域投票并发数={vote_concurrency}",
         flush=True,
     )
@@ -403,7 +427,13 @@ def main():
         mp_context=SPAWN_CONTEXT,
     ) as executor:
         futures = {
-            executor.submit(process_region, region, args, vote_concurrency): region
+            executor.submit(
+                process_region,
+                region,
+                args,
+                vote_concurrency,
+                precheck_concurrency,
+            ): region
             for region in regions
         }
         for future in as_completed(futures):

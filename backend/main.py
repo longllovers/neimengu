@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
+from . import task_store
 from .adapters import TaskRuntime, execute, path_value
 from .catalog import TOOL_MAP, public_catalog
 from .repositories import preview_file, repository_tree, safe_path
@@ -86,6 +87,8 @@ class TaskRecord:
             }
             self.next_sequence += 1
             self.events.append(event)
+            snapshot = self.snapshot(include_parameters=True)
+        task_store.save_emission(snapshot, event)
 
     def snapshot(self, include_parameters: bool = False) -> dict[str, Any]:
         with self.lock:
@@ -104,6 +107,28 @@ class TaskRecord:
 TASKS: dict[str, TaskRecord] = {}
 TASKS_LOCK = threading.RLock()
 MAX_TASKS = 300
+
+
+def restore_tasks() -> None:
+    task_store.initialize()
+    for saved in task_store.load_tasks(MAX_TASKS):
+        restored = TaskRecord(
+            id=saved["id"], tool_id=saved["tool_id"], tool_name=saved["tool_name"],
+            parameters=saved["parameters"], status=saved["status"],
+            created_at=saved["created_at"], started_at=saved["started_at"],
+            finished_at=saved["finished_at"], result=saved["result"], error=saved["error"],
+            events=deque(saved["events"], maxlen=20_000),
+            next_sequence=max((int(event["sequence"]) for event in saved["events"]), default=0) + 1,
+        )
+        TASKS[restored.id] = restored
+        if restored.status in {"queued", "running", "cancelling"}:
+            restored.status = "failed"
+            restored.error = "服务重启，原运行进程已中断"
+            restored.finished_at = datetime.now().isoformat(timespec="seconds")
+            restored.emit("status", {"status": "failed", "message": restored.error})
+
+
+restore_tasks()
 
 
 def get_task(task_id: str) -> TaskRecord:
@@ -180,6 +205,8 @@ def run_task(task: TaskRecord) -> None:
         with task.lock:
             task.finished_at = datetime.now().isoformat(timespec="seconds")
             task.runtime = None
+            snapshot = task.snapshot(include_parameters=True)
+        task_store.save_task(snapshot)
 
 
 @app.get("/api/health")
@@ -363,8 +390,10 @@ def create_task(tool_id: str, body: TaskRequest) -> dict[str, Any]:
     with TASKS_LOCK:
         if len(TASKS) >= MAX_TASKS:
             removable = [key for key, value in TASKS.items() if value.status not in {"queued", "running", "cancelling"}]
-            for key in removable[: max(1, len(TASKS) - MAX_TASKS + 1)]:
+            removed = removable[: max(1, len(TASKS) - MAX_TASKS + 1)]
+            for key in removed:
                 TASKS.pop(key, None)
+            task_store.delete_tasks(removed)
         TASKS[task.id] = task
     threading.Thread(target=run_task, args=(task,), name=f"task-{task.id[:8]}", daemon=True).start()
     return task.snapshot(include_parameters=True)

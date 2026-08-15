@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, NavLink, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Activity, ArrowRight, CheckCircle2, ChevronRight, CircleStop, Database,
   Code2, FileCheck2, FolderInput, Gauge, Layers3, Menu, PanelLeftClose, Play,
@@ -153,21 +153,37 @@ function matchesCondition(condition, values) {
 }
 
 function ToolPage({ tool }) {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const restoredTaskId = searchParams.get('task') || ''
   const storageKey = `geo-workbench:v2:${tool.id}`
   const [values, setValues] = useState(() => {
     try { return { ...defaultsFor(tool), ...JSON.parse(localStorage.getItem(storageKey) || '{}') } } catch { return defaultsFor(tool) }
   })
   const [formError, setFormError] = useState('')
-  const { task, logs, progress, start, cancel } = useTask(tool.id)
+  const { task, logs, progress, start, cancel } = useTask(tool.id, restoredTaskId)
   const running = ['submitting', 'queued', 'running', 'cancelling'].includes(task?.status)
   const canTerminate = Boolean(task?.id) && ['queued', 'running'].includes(task?.status)
+
+  useEffect(() => {
+    if (!restoredTaskId) return
+    fetch(`/api/tasks/${restoredTaskId}`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('无法恢复该次任务')))
+      .then((savedTask) => {
+        if (savedTask.tool_id === tool.id) setValues({ ...defaultsFor(tool), ...savedTask.parameters })
+      })
+      .catch((error) => setFormError(error.message))
+  }, [restoredTaskId, tool])
 
   const submit = async (event) => {
     event.preventDefault(); setFormError('')
     const missing = tool.fields.filter((field) => matchesCondition(field.visibleWhen, values) && (field.required || matchesCondition(field.requiredWhen, values) && field.requiredWhen) && !String(values[field.name] ?? '').trim())
     if (missing.length) { setFormError(`请填写：${missing.map((field) => field.label).join('、')}`); return }
     localStorage.setItem(storageKey, JSON.stringify(values))
-    try { await start(values) } catch (error) { setFormError(error.message) }
+    try {
+      const created = await start(values)
+      navigate(`/tools/${tool.id}?task=${created.id}`, { replace: true })
+    } catch (error) { setFormError(error.message) }
   }
   const terminate = async () => {
     setFormError('')
@@ -222,8 +238,17 @@ function ClipProgress({ events }) {
 function TaskHistory() {
   const [tasks, setTasks] = useState([])
   const [error, setError] = useState('')
-  useEffect(() => { fetch('/api/tasks?limit=50').then((response) => response.json()).then((data) => setTasks(data.tasks || [])).catch((reason) => setError(reason.message)) }, [])
-  return <main className="page history-page"><header className="simple-head"><span className="section-kicker">RUN ARCHIVE</span><h1>运行记录</h1><p>最近 50 次任务的状态与运行时间。</p></header>{error ? <EmptyState title="无法读取记录" message={error} /> : tasks.length ? <div className="history-table"><div className="history-row header"><span>工具</span><span>状态</span><span>开始时间</span><span>结束时间</span></div>{tasks.map((task) => <div className="history-row" key={task.id}><span><b>{task.tool_name}</b><small>{task.id.slice(0, 10)}</small></span><span><i className={`history-status ${task.status}`} />{task.status}</span><span>{formatTime(task.started_at || task.created_at)}</span><span>{formatTime(task.finished_at) || '—'}</span></div>)}</div> : <EmptyState title="还没有运行记录" message="从任一工具页面启动任务后，记录会出现在这里。" />}</main>
+  useEffect(() => {
+    let active = true
+    const load = () => fetch('/api/tasks?limit=50')
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error('无法读取运行记录')))
+      .then((data) => { if (active) { setTasks(data.tasks || []); setError('') } })
+      .catch((reason) => { if (active) setError(reason.message) })
+    load()
+    const timer = window.setInterval(load, 3000)
+    return () => { active = false; window.clearInterval(timer) }
+  }, [])
+  return <main className="page history-page"><header className="simple-head"><span className="section-kicker">RUN ARCHIVE</span><h1>运行记录</h1><p>最近 50 次任务的状态与运行时间。点击记录可返回该次运行位置。</p></header>{error ? <EmptyState title="无法读取记录" message={error} /> : tasks.length ? <div className="history-table"><div className="history-row header"><span>工具</span><span>状态</span><span>开始时间</span><span>结束时间</span></div>{tasks.map((task) => <Link className="history-row history-link" to={`/tools/${task.tool_id}?task=${task.id}`} key={task.id}><span><b>{task.tool_name}</b><small>{task.id.slice(0, 10)}</small></span><span><i className={`history-status ${task.status}`} />{task.status}</span><span>{formatTime(task.started_at || task.created_at)}</span><span>{formatTime(task.finished_at) || '—'}</span></Link>)}</div> : <EmptyState title="还没有运行记录" message="从任一工具页面启动任务后，记录会出现在这里。" />}</main>
 }
 
 function formatTime(value) { return value ? value.replace('T', ' ') : '' }

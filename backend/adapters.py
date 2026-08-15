@@ -256,7 +256,12 @@ def command_for(tool: dict[str, Any], payload: dict[str, Any]) -> list[tuple[Pat
     if tool_id == "vote":
         required(payload, "shp_dir")
         if payload.get("operation", "run") == "refresh_index":
-            cmd = [PYTHON, str(folder / "vote.py"), "--shp_dir", path_value(payload, "shp_dir"), "--refresh-shp-cache-only"]
+            cmd = [
+                PYTHON, str(folder / "vote.py"),
+                "--shp_dir", path_value(payload, "shp_dir"),
+                "--refresh-shp-cache-only",
+                "--index-concurrency-count", str(payload.get("index_concurrency_count", 4)),
+            ]
             return [(folder, cmd)]
         required(payload, "cls_tif", "out_dir")
         temp_dir = Path(tempfile.mkdtemp(prefix="geo-vote-"))
@@ -271,7 +276,9 @@ def command_for(tool: dict[str, Any], payload: dict[str, Any]) -> list[tuple[Pat
             "--output-dir", path_value(payload, "out_dir"),
             "--MIN_BACKGROUND_THRESHOLD", str(payload.get("background_threshold", 0.5)),
             "--MIN_CLASS_AREA_MU", str(payload.get("min_class_area_mu", 999999999)),
-            "--concurrency-count", str(payload.get("concurrency_count", payload.get("parallel_count", 4))),
+            "--index-concurrency-count", str(payload.get("index_concurrency_count", 4)),
+            "--precheck-concurrency-count", str(payload.get("precheck_concurrency_count", 8)),
+            "--concurrency-count", str(payload.get("vote_concurrency_count", payload.get("concurrency_count", 4))),
         ]
         option(cmd, "--region-name", payload.get("region_name")); flag(cmd, payload.get("multi_class"), "--multi-class")
         if payload.get("multi_class"):

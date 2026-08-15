@@ -16,7 +16,7 @@ import traceback
 import numpy as np
 from tqdm import tqdm
 import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 import fiona
 import rasterio
@@ -30,8 +30,7 @@ from shapely.ops import transform
 import argparse
 import json
 import re
-import uuid
-from contextlib import contextmanager
+import sqlite3
 
 
 
@@ -40,10 +39,12 @@ MIN_BACKGROUND_THRESHOLD = 0.5
 MIN_CLASS_AREA_MU = 999999999
 CLASS_FIELD = "class"
 NUM_WORKERS = 40
-SHP_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "save.json")
+SHP_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "save.sqlite3")
+LEGACY_SHP_CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "save.json")
 MU_SQUARE_METERS = 666.6666666667
-SHP_INDEX_WORKERS = 4
+DEFAULT_INDEX_CONCURRENCY = 4
 SHP_TASK_PRECHECK_WORKERS = 4
+SHP_INDEX_WORKERS = DEFAULT_INDEX_CONCURRENCY
 SPAWN_CONTEXT = mp.get_context("spawn")
 
 # True:
@@ -617,19 +618,18 @@ def _empty_shp_cache():
     }
 
 
-def _load_shp_cache(cache_path=SHP_CACHE_PATH):
-    if not os.path.exists(cache_path) or os.path.getsize(cache_path) == 0:
+def _load_legacy_shp_cache(legacy_path=LEGACY_SHP_CACHE_PATH):
+    """读取旧 JSON 索引，仅供首次迁移到 SQLite。"""
+    if not os.path.exists(legacy_path) or os.path.getsize(legacy_path) == 0:
         return _empty_shp_cache()
-
     try:
-        with open(cache_path, "r", encoding="utf-8") as cache_file:
+        with open(legacy_path, "r", encoding="utf-8") as cache_file:
             cache = json.load(cache_file)
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"[WARNING] Cannot read shp cache, rebuilding it: {exc}")
+        print(f"[WARNING] Cannot migrate legacy SHP cache: {exc}", flush=True)
         return _empty_shp_cache()
-
     if not isinstance(cache, dict) or not isinstance(cache.get("directories"), dict):
-        print("[WARNING] Invalid shp cache format, rebuilding it.")
+        print("[WARNING] Invalid legacy SHP cache; it will be rebuilt.", flush=True)
         return _empty_shp_cache()
     cache.setdefault("built_roots", [])
     cache.setdefault("cities", {})
@@ -642,73 +642,125 @@ def _load_shp_cache(cache_path=SHP_CACHE_PATH):
     return cache
 
 
-@contextmanager
-def _cache_write_lock(cache_path, timeout=3600, stale_seconds=21600):
-    """跨并发任务串行更新索引，崩溃遗留锁超过 6 小时后可回收。"""
-    lock_path = f"{cache_path}.lock"
-    lock_token = f"{os.getpid()}-{uuid.uuid4().hex}"
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(descriptor, lock_token.encode("ascii"))
-            os.close(descriptor)
-            break
-        except FileExistsError:
-            try:
-                if time.time() - os.path.getmtime(lock_path) > stale_seconds:
-                    os.remove(lock_path)
-                    continue
-            except FileNotFoundError:
-                continue
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"等待 SHP 索引写锁超时: {lock_path}")
-            time.sleep(0.5)
-    try:
-        yield
-    finally:
-        try:
-            with open(lock_path, "r", encoding="ascii") as lock_file:
-                owns_lock = lock_file.read() == lock_token
-            if owns_lock:
-                os.remove(lock_path)
-        except (FileNotFoundError, OSError, UnicodeDecodeError):
-            pass
-
-
-def _save_shp_cache(cache, cache_path=SHP_CACHE_PATH):
+def _connect_shp_cache(cache_path=SHP_CACHE_PATH):
+    """创建支持并发读取、事务写入的 SQLite 索引连接。"""
     cache_dir = os.path.dirname(os.path.abspath(cache_path))
     os.makedirs(cache_dir, exist_ok=True)
-    with _cache_write_lock(cache_path):
-        # 锁内重新读取并合并，避免两个不同根目录的并发索引互相覆盖。
-        latest = _empty_shp_cache()
-        if os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
-            try:
-                with open(cache_path, "r", encoding="utf-8") as cache_file:
-                    loaded = json.load(cache_file)
-                if isinstance(loaded, dict):
-                    latest.update(loaded)
-            except (OSError, json.JSONDecodeError):
-                pass
-        ordered_cache = {
-            "version": 4,
-            "built_roots": sorted(set(latest.get("built_roots", [])) | set(cache.get("built_roots", []))),
-            "directories": {**latest.get("directories", {}), **cache.get("directories", {})},
-            "cities": {**latest.get("cities", {}), **cache.get("cities", {})},
-            "counties": {**latest.get("counties", {}), **cache.get("counties", {})},
-            "unmatched_boundary_files": {
-                **latest.get("unmatched_boundary_files", {}),
-                **cache.get("unmatched_boundary_files", {}),
-            },
-        }
-        temp_path = f"{cache_path}.tmp.{os.getpid()}"
+    deadline = time.monotonic() + 60
+    while True:
+        connection = sqlite3.connect(cache_path, timeout=60)
         try:
-            with open(temp_path, "w", encoding="utf-8") as cache_file:
-                json.dump(ordered_cache, cache_file, ensure_ascii=False, indent=2)
-            os.replace(temp_path, cache_path)
+            connection.execute("PRAGMA busy_timeout = 60000")
+            current_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
+            if str(current_mode).lower() != "wal":
+                connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS shp_cache_roots (
+                    root_key TEXT PRIMARY KEY,
+                    files_json TEXT NOT NULL,
+                    cities_json TEXT NOT NULL,
+                    counties_json TEXT NOT NULL,
+                    unmatched_json TEXT NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            connection.commit()
+            return connection
+        except sqlite3.OperationalError as exc:
+            connection.close()
+            if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
+def _save_shp_cache(cache, cache_path=SHP_CACHE_PATH, root_keys=None):
+    """按 SHP 根目录事务写入；SQLite 负责并发写入排队和故障回滚。"""
+    if root_keys is None:
+        roots = sorted(
+            set(cache.get("built_roots", []))
+            | set(cache.get("directories", {}))
+        )
+    else:
+        roots = sorted(set(root_keys))
+    connection = _connect_shp_cache(cache_path)
+    try:
+        with connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for root_key in roots:
+                connection.execute(
+                """
+                INSERT INTO shp_cache_roots (
+                    root_key, files_json, cities_json, counties_json,
+                    unmatched_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(root_key) DO UPDATE SET
+                    files_json=excluded.files_json,
+                    cities_json=excluded.cities_json,
+                    counties_json=excluded.counties_json,
+                    unmatched_json=excluded.unmatched_json,
+                    updated_at=excluded.updated_at
+                """,
+                    (
+                        root_key,
+                        json.dumps(cache.get("directories", {}).get(root_key, []), ensure_ascii=False),
+                        json.dumps(cache.get("cities", {}).get(root_key, {}), ensure_ascii=False),
+                        json.dumps(cache.get("counties", {}).get(root_key, {}), ensure_ascii=False),
+                        json.dumps(
+                            cache.get("unmatched_boundary_files", {}).get(root_key, []),
+                            ensure_ascii=False,
+                        ),
+                        time.time(),
+                    ),
+                )
+    finally:
+        connection.close()
+
+
+def _load_shp_cache(cache_path=SHP_CACHE_PATH):
+    cache = _empty_shp_cache()
+    try:
+        connection = _connect_shp_cache(cache_path)
+        try:
+            rows = connection.execute(
+                """
+                SELECT root_key, files_json, cities_json, counties_json, unmatched_json
+                FROM shp_cache_roots
+                ORDER BY root_key
+                """
+            ).fetchall()
         finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+            connection.close()
+    except (sqlite3.Error, OSError) as exc:
+        print(f"[WARNING] Cannot read SQLite SHP cache, rebuilding it: {exc}", flush=True)
+        return cache
+
+    if not rows and os.path.abspath(cache_path) == os.path.abspath(SHP_CACHE_PATH):
+        legacy_cache = _load_legacy_shp_cache()
+        if legacy_cache["built_roots"]:
+            try:
+                _save_shp_cache(legacy_cache, cache_path)
+                print(
+                    f"[INFO] Migrated legacy SHP cache to SQLite: {cache_path}",
+                    flush=True,
+                )
+                return legacy_cache
+            except (sqlite3.Error, OSError) as exc:
+                print(f"[WARNING] Legacy SHP cache migration failed: {exc}", flush=True)
+
+    for root_key, files_text, cities_text, counties_text, unmatched_text in rows:
+        try:
+            cache["directories"][root_key] = json.loads(files_text)
+            cache["cities"][root_key] = json.loads(cities_text)
+            cache["counties"][root_key] = json.loads(counties_text)
+            cache["unmatched_boundary_files"][root_key] = json.loads(unmatched_text)
+            cache["built_roots"].append(root_key)
+        except (TypeError, json.JSONDecodeError) as exc:
+            print(f"[WARNING] Ignoring invalid SQLite cache row {root_key!r}: {exc}", flush=True)
+    cache["built_roots"].sort()
+    return cache
 
 
 def _normalize_region_name(value):
@@ -825,7 +877,7 @@ def _load_boundary_features(shp_dir):
 
 
 def _match_shp_to_boundaries(shp_path, boundary_features):
-    """只读取和计算单个 SHP；不修改共享索引，也不写 save.json。"""
+    """只读取和计算单个 SHP；不修改共享 SQLite 索引。"""
     matched_names = set()
     matched_cities = set()
     matched_counties = set()
@@ -856,21 +908,25 @@ def _match_shp_to_boundaries(shp_path, boundary_features):
     return shp_path, matched_names, matched_cities, matched_counties, error
 
 
-def _build_region_index(shp_files, shp_dir):
+def _build_region_index(shp_files, shp_dir, concurrency_count=DEFAULT_INDEX_CONCURRENCY):
     city_index = {}
     county_index = {}
     unmatched_boundary_files = []
     boundary_features = _load_boundary_features(shp_dir)
     total_files = len(shp_files)
+    if total_files == 0:
+        print("[INFO] Region cache index completed: no shapefiles to index.", flush=True)
+        return {}, {}, []
+    active_concurrency = min(max(1, int(concurrency_count)), total_files)
     print(
         f"[INFO] Starting region cache index for {total_files} input shapefile(s) "
-        f"with concurrency={SHP_INDEX_WORKERS}.",
+        f"with concurrency={active_concurrency}.",
         flush=True,
     )
 
     # 并发任务仅返回匹配结果；以下汇总逻辑统一执行，避免同时修改索引。
     with ProcessPoolExecutor(
-        max_workers=SHP_INDEX_WORKERS,
+        max_workers=active_concurrency,
         mp_context=SPAWN_CONTEXT,
     ) as executor:
         futures = {
@@ -918,6 +974,7 @@ def find_cultivated_land_shapefiles(
     cache_path=SHP_CACHE_PATH,
     refresh_cache=False,
     region_name=None,
+    index_concurrency_count=DEFAULT_INDEX_CONCURRENCY,
 ):
     """优先从 JSON 缓存按市县名称读取，否则扫描并更新缓存。"""
     shp_dir = os.path.abspath(os.path.expanduser(shp_dir))
@@ -959,13 +1016,18 @@ def find_cultivated_land_shapefiles(
             f"[INFO] Input shapefile scan completed: {len(shp_files)} file(s) found under {shp_dir}.",
             flush=True,
         )
-        city_index, county_index, unmatched_boundary_files = _build_region_index(shp_files, shp_dir)
+        city_index, county_index, unmatched_boundary_files = _build_region_index(
+            shp_files,
+            shp_dir,
+            concurrency_count=index_concurrency_count,
+        )
         cache["directories"][cache_key] = shp_files
         cache["cities"][cache_key] = city_index
         cache["counties"][cache_key] = county_index
         cache["unmatched_boundary_files"][cache_key] = unmatched_boundary_files
         cache["built_roots"] = sorted(set(cache["built_roots"]) | {cache_key})
-        _save_shp_cache(cache, cache_path)
+        # 只更新本次建立的根目录，避免并发任务用旧快照覆盖其他根目录的新索引。
+        _save_shp_cache(cache, cache_path, root_keys=[cache_key])
         cached_cities = cache["cities"][cache_key]
         cached_counties = cache["counties"][cache_key]
         print(
@@ -1026,20 +1088,24 @@ def build_tasks(
         shp_dir,
         refresh_cache=refresh_shp_cache,
         region_name=region_name,
+        index_concurrency_count=SHP_INDEX_WORKERS,
     )
     print(f"[INFO] Found {len(shp_files)} shapefile(s) under: {shp_dir}")
     number_width = max(3, len(str(len(shp_files))))
+    active_precheck_concurrency = min(
+        SHP_TASK_PRECHECK_WORKERS,
+        max(1, len(shp_files)),
+    )
     print(
         f"[INFO] Checking {len(shp_files)} shapefile(s) with "
-        f"concurrency={SHP_TASK_PRECHECK_WORKERS} before voting.",
+        f"concurrency={active_precheck_concurrency} before voting.",
         flush=True,
     )
     task_records = []
     errors = []
-    with ProcessPoolExecutor(
-        max_workers=SHP_TASK_PRECHECK_WORKERS,
-        mp_context=SPAWN_CONTEXT,
-    ) as executor:
+    # 此阶段只读取各 SHP 的元数据并做范围相交判断，I/O 占主导。
+    # 线程无需重复启动解释器或序列化边界对象；真正的投票仍使用独立进程。
+    with ThreadPoolExecutor(max_workers=active_precheck_concurrency) as executor:
         futures = [
             executor.submit(
                 _prepare_vote_task,
@@ -1321,7 +1387,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--refresh-shp-cache",
         action="store_true",
-        help="忽略当前 shp_dir 的旧缓存，重新扫描并覆盖写入 save.json",
+        help="忽略当前 shp_dir 的旧缓存，重新扫描并事务写入 SQLite 索引",
     )
     parser.add_argument(
         "--refresh-shp-cache-only",
@@ -1338,15 +1404,37 @@ if __name__ == "__main__":
         dest="concurrency_count",
         type=int,
         default=40,
-        help="投票并发数，默认 40。按行政区并发运行时建议降低该值。",
+        help="实际投票并发数。",
+    )
+    parser.add_argument(
+        "--index-concurrency-count",
+        type=int,
+        default=DEFAULT_INDEX_CONCURRENCY,
+        help="建立索引时同时处理的 SHP 文件数。",
+    )
+    parser.add_argument(
+        "--precheck-concurrency-count",
+        type=int,
+        default=4,
+        help="投票前范围相交检查同时处理的 SHP 文件数。",
     )
     args = parser.parse_args()
     shp_dir = args.shp_dir
+    if not 1 <= args.concurrency_count <= 96:
+        parser.error("--concurrency-count 必须在 1 到 96 之间")
+    if not 1 <= args.index_concurrency_count <= 96:
+        parser.error("--index-concurrency-count 必须在 1 到 96 之间")
+    if not 1 <= args.precheck_concurrency_count <= 96:
+        parser.error("--precheck-concurrency-count 必须在 1 到 96 之间")
+    NUM_WORKERS = args.concurrency_count
+    SHP_INDEX_WORKERS = args.index_concurrency_count
+    SHP_TASK_PRECHECK_WORKERS = args.precheck_concurrency_count
     if args.refresh_shp_cache_only or args.ensure_shp_cache_only:
         shp_files = find_cultivated_land_shapefiles(
             shp_dir,
             refresh_cache=args.refresh_shp_cache_only,
             region_name=None,
+            index_concurrency_count=args.index_concurrency_count,
         )
         action_text = "refresh completed" if args.refresh_shp_cache_only else "is ready"
         print(f"[SUMMARY] SHP index {action_text}: {len(shp_files)} file(s).", flush=True)
@@ -1370,10 +1458,6 @@ if __name__ == "__main__":
         )
         print(f"[INFO] SHP class mapping: {mapping_text}", flush=True)
     
-    if args.concurrency_count < 1:
-        parser.error("--concurrency-count 必须大于等于 1")
-    NUM_WORKERS = args.concurrency_count
-
     run(
         shp_dir=shp_dir,
         cls_path=cls_tif,

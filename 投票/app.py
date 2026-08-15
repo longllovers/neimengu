@@ -69,7 +69,9 @@ DEFAULT_INPUT1_PATH = ""
 DEFAULT_OUTPUT2_PATH = ""
 DEFAULT_MIN_BACKGROUND_THRESHOLD = "0.5"
 DEFAULT_MIN_CLASS_AREA_MU = "999999999"
-DEFAULT_CONCURRENCY_COUNT = "4"
+DEFAULT_INDEX_CONCURRENCY_COUNT = "4"
+DEFAULT_PRECHECK_CONCURRENCY_COUNT = "8"
+DEFAULT_VOTE_CONCURRENCY_COUNT = "4"
 DEFAULT_CLASS_MAPPING = (
     "1=春玉米\n"
     "2=中稻\n"
@@ -98,7 +100,7 @@ TIF_SUFFIXES = {".tif", ".tiff"}
 
 
 def hidden_subprocess_options():
-    """在 Windows 上启动 Python 子任务时不创建控制台窗口。"""
+    """在 Windows 上启动 Python 子进程时不创建控制台窗口。"""
     if os.name != "nt":
         return {}
     startupinfo = subprocess.STARTUPINFO()
@@ -214,7 +216,15 @@ def current_values(form_data):
         "output2_path": form_value(form_data, "output2_path", DEFAULT_OUTPUT2_PATH),
         "min_background_threshold": form_value(form_data, "min_background_threshold", DEFAULT_MIN_BACKGROUND_THRESHOLD),
         "min_class_area_mu": form_value(form_data, "min_class_area_mu", DEFAULT_MIN_CLASS_AREA_MU),
-        "concurrency_count": form_value(form_data, "concurrency_count", DEFAULT_CONCURRENCY_COUNT),
+        "index_concurrency_count": form_value(
+            form_data, "index_concurrency_count", DEFAULT_INDEX_CONCURRENCY_COUNT
+        ),
+        "precheck_concurrency_count": form_value(
+            form_data, "precheck_concurrency_count", DEFAULT_PRECHECK_CONCURRENCY_COUNT
+        ),
+        "vote_concurrency_count": form_value(
+            form_data, "vote_concurrency_count", DEFAULT_VOTE_CONCURRENCY_COUNT
+        ),
         "multi_class": form_data.get("multi_class", [""])[0] == "1",
         "class_mapping": form_value(form_data, "class_mapping", DEFAULT_CLASS_MAPPING),
     }
@@ -229,7 +239,9 @@ def normalize_values(values):
         "output2_path": convert_network_path(values["output2_path"]),
         "min_background_threshold": values["min_background_threshold"],
         "min_class_area_mu": values["min_class_area_mu"],
-        "concurrency_count": values["concurrency_count"],
+        "index_concurrency_count": values["index_concurrency_count"],
+        "precheck_concurrency_count": values["precheck_concurrency_count"],
+        "vote_concurrency_count": values["vote_concurrency_count"],
         "multi_class": bool(values.get("multi_class", False)),
         "class_mapping": values.get("class_mapping", "").strip(),
     }
@@ -464,7 +476,9 @@ def build_html(values, result=None):
         "output2_path": DEFAULT_OUTPUT2_PATH,
         "min_background_threshold": DEFAULT_MIN_BACKGROUND_THRESHOLD,
         "min_class_area_mu": DEFAULT_MIN_CLASS_AREA_MU,
-        "concurrency_count": DEFAULT_CONCURRENCY_COUNT,
+        "index_concurrency_count": DEFAULT_INDEX_CONCURRENCY_COUNT,
+        "precheck_concurrency_count": DEFAULT_PRECHECK_CONCURRENCY_COUNT,
+        "vote_concurrency_count": DEFAULT_VOTE_CONCURRENCY_COUNT,
         "class_mapping": DEFAULT_CLASS_MAPPING,
     }
 
@@ -633,6 +647,30 @@ def build_html(values, result=None):
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 16px;
             margin-top: 2px;
+        }}
+
+        .concurrency-grid {{
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+            margin-top: 2px;
+        }}
+
+        .concurrency-grid .field {{
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }}
+
+        .concurrency-grid label {{
+            white-space: nowrap;
+        }}
+
+        .concurrency-hint {{
+            margin: 7px 2px 0;
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.5;
         }}
 
         button {{
@@ -836,6 +874,11 @@ def build_html(values, result=None):
                 grid-template-columns: 1fr;
                 gap: 0;
             }}
+
+            .concurrency-grid {{
+                grid-template-columns: 1fr;
+                gap: 0;
+            }}
         }}
     </style>
 </head>
@@ -849,7 +892,7 @@ def build_html(values, result=None):
         <form class="card run-form" method="post" data-status-id="pipeline_status" onsubmit="return false;">
             <input type="hidden" name="action" value="run_all">
             <h2>投票并合并</h2>
-            <p class="hint">输入可为单个 TIF，也可为文件夹；文件夹模式会递归处理全部 TIF，并为每个 TIF 使用独立的 Python 子任务。</p>
+            <p class="hint">输入可为单个 TIF，也可为文件夹；文件夹模式会递归处理全部 TIF，并按页面设置的索引、相交检查和投票并发数处理。</p>
 
             <div class="field">
                 <label for="df_path">输入 SHP 根目录 <span>首次运行会扫描并缓存</span></label>
@@ -894,9 +937,23 @@ def build_html(values, result=None):
                     <label for="min_class_area_mu">分类面积保留阈值/亩 <span>默认：{html_escape(defaults["min_class_area_mu"])}</span></label>
                     <input id="min_class_area_mu" type="number" name="min_class_area_mu" min="0" step="0.01" required value="{html_escape(values["min_class_area_mu"])}">
                 </div>
+            </div>
+
+            <div class="concurrency-grid">
                 <div class="field">
-                    <label for="concurrency_count">并发数 <span>默认：{html_escape(defaults["concurrency_count"])}</span></label>
-                    <input id="concurrency_count" type="number" name="concurrency_count" min="1" max="96" step="1" required value="{html_escape(values["concurrency_count"])}">
+                    <label for="index_concurrency_count">索引并发数 <span>默认：{html_escape(defaults["index_concurrency_count"])}</span></label>
+                    <input id="index_concurrency_count" type="number" name="index_concurrency_count" min="1" max="96" step="1" required value="{html_escape(values["index_concurrency_count"])}">
+                    <p class="concurrency-hint">同时建立索引的 SHP 数</p>
+                </div>
+                <div class="field">
+                    <label for="precheck_concurrency_count">相交检查并发数 <span>默认：{html_escape(defaults["precheck_concurrency_count"])}</span></label>
+                    <input id="precheck_concurrency_count" type="number" name="precheck_concurrency_count" min="1" max="96" step="1" required value="{html_escape(values["precheck_concurrency_count"])}">
+                    <p class="concurrency-hint">同时检查范围相交的 SHP 数</p>
+                </div>
+                <div class="field">
+                    <label for="vote_concurrency_count">投票并发数 <span>默认：{html_escape(defaults["vote_concurrency_count"])}</span></label>
+                    <input id="vote_concurrency_count" type="number" name="vote_concurrency_count" min="1" max="96" step="1" required value="{html_escape(values["vote_concurrency_count"])}">
+                    <p class="concurrency-hint">投票任务总并发数</p>
                 </div>
             </div>
 
@@ -976,14 +1033,21 @@ def build_html(values, result=None):
             var titleEl = document.getElementById("result_title");
             var badgeEl = document.getElementById("result_badge");
             var outputEl = document.getElementById("run_output");
-            var concurrencyCount = form.querySelector('[name="concurrency_count"]');
-            var concurrencyText = concurrencyCount ? concurrencyCount.value : "1";
+            var indexConcurrency = form.querySelector('[name="index_concurrency_count"]');
+            var precheckConcurrency = form.querySelector('[name="precheck_concurrency_count"]');
+            var voteConcurrency = form.querySelector('[name="vote_concurrency_count"]');
+            var indexConcurrencyText = indexConcurrency ? indexConcurrency.value : "1";
+            var precheckConcurrencyText = precheckConcurrency ? precheckConcurrency.value : "1";
+            var voteConcurrencyText = voteConcurrency ? voteConcurrency.value : "1";
+            var concurrencyText = requestedAction === "refresh_shp_index"
+                ? "索引并发数：" + indexConcurrencyText
+                : "索引：" + indexConcurrencyText + "，相交检查：" + precheckConcurrencyText + "，投票：" + voteConcurrencyText;
             var areaSummaryEl = document.getElementById("area_summary");
             var areaSummaryBodyEl = document.getElementById("area_summary_body");
             var areaCsvPathEl = document.getElementById("area_csv_path");
 
             if (statusEl) {{
-                statusEl.textContent = "正在运行，并发数：" + concurrencyText;
+                statusEl.textContent = "正在运行，" + concurrencyText;
                 statusEl.className = "run-status running";
             }}
 
@@ -1037,7 +1101,7 @@ def build_html(values, result=None):
                             badgeEl.textContent = "正在运行";
                             badgeEl.className = "badge";
                             if (statusEl) {{
-                                statusEl.textContent = "正在运行：" + eventData.name + "（并发数：" + concurrencyText + "）";
+                                statusEl.textContent = "正在运行：" + eventData.name + "（" + concurrencyText + "）";
                                 statusEl.className = "run-status running";
                             }}
                             if (hasOutput) {{
@@ -1129,7 +1193,9 @@ class ScriptRunHandler(BaseHTTPRequestHandler):
             "output2_path": DEFAULT_OUTPUT2_PATH,
             "min_background_threshold": DEFAULT_MIN_BACKGROUND_THRESHOLD,
             "min_class_area_mu": DEFAULT_MIN_CLASS_AREA_MU,
-            "concurrency_count": DEFAULT_CONCURRENCY_COUNT,
+            "index_concurrency_count": DEFAULT_INDEX_CONCURRENCY_COUNT,
+            "precheck_concurrency_count": DEFAULT_PRECHECK_CONCURRENCY_COUNT,
+            "vote_concurrency_count": DEFAULT_VOTE_CONCURRENCY_COUNT,
             "multi_class": False,
             "class_mapping": DEFAULT_CLASS_MAPPING,
         }
@@ -1164,6 +1230,8 @@ class ScriptRunHandler(BaseHTTPRequestHandler):
                 "--shp_dir",
                 values["df_path"],
                 "--refresh-shp-cache-only",
+                "--index-concurrency-count",
+                values["index_concurrency_count"],
             ]
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -1206,7 +1274,9 @@ class ScriptRunHandler(BaseHTTPRequestHandler):
                         "--output-dir", values["output2_path"],
                         "--MIN_BACKGROUND_THRESHOLD", values["min_background_threshold"],
                         "--MIN_CLASS_AREA_MU", values["min_class_area_mu"],
-                        "--concurrency-count", values["concurrency_count"],
+                        "--index-concurrency-count", values["index_concurrency_count"],
+                        "--precheck-concurrency-count", values["precheck_concurrency_count"],
+                        "--concurrency-count", values["vote_concurrency_count"],
                     ]
                     label = f"批量处理并统一合并 {len(tif_files)} 个 TIF"
                 else:
@@ -1219,7 +1289,9 @@ class ScriptRunHandler(BaseHTTPRequestHandler):
                         "--output-dir", values["output2_path"],
                         "--MIN_BACKGROUND_THRESHOLD", values["min_background_threshold"],
                         "--MIN_CLASS_AREA_MU", values["min_class_area_mu"],
-                        "--concurrency-count", values["concurrency_count"],
+                        "--index-concurrency-count", values["index_concurrency_count"],
+                        "--precheck-concurrency-count", values["precheck_concurrency_count"],
+                        "--concurrency-count", values["vote_concurrency_count"],
                     ]
                     label = f"处理 TIF：{tif_files[0].name}"
                 if values["multi_class"]:
