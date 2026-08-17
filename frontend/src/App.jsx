@@ -250,6 +250,7 @@ function ClipProgress({ events }) {
 }
 
 function TaskHistory() {
+  const navigate = useNavigate()
   const [tasks, setTasks] = useState([])
   const [error, setError] = useState('')
   useEffect(() => {
@@ -262,7 +263,7 @@ function TaskHistory() {
     const timer = window.setInterval(load, 3000)
     return () => { active = false; window.clearInterval(timer) }
   }, [])
-  return <main className="page history-page"><header className="simple-head"><span className="section-kicker">RUN ARCHIVE</span><h1>运行记录</h1><p>最近 50 次任务的状态与运行时间。点击记录可返回该次运行位置。</p></header>{error ? <EmptyState title="无法读取记录" message={error} /> : tasks.length ? <div className="history-table"><div className="history-row header"><span>工具</span><span>状态</span><span>开始时间</span><span>结束时间</span></div>{tasks.map((task) => <Link className="history-row history-link" to={`/tools/${task.tool_id}?task=${task.id}`} key={task.id}><span><b>{task.tool_name}</b><small>{task.id.slice(0, 10)}</small></span><span><i className={`history-status ${task.status}`} />{task.status}</span><span>{formatTime(task.started_at || task.created_at)}</span><span>{formatTime(task.finished_at) || '—'}</span></Link>)}</div> : <EmptyState title="还没有运行记录" message="从任一工具页面启动任务后，记录会出现在这里。" />}</main>
+  return <main className="page history-page"><header className="simple-head"><span className="section-kicker">RUN ARCHIVE</span><h1>运行记录</h1><p>最近 50 次任务的状态与运行时间。双击记录可返回任务页面，日志保存在 log/tasks/日期/任务ID-工具名称.log。</p></header>{error ? <EmptyState title="无法读取记录" message={error} /> : tasks.length ? <div className="history-table"><div className="history-row header"><span>工具</span><span>任务 ID</span><span>状态</span><span>开始时间</span><span>结束时间</span></div>{tasks.map((task) => { const target = `/tools/${task.tool_id}?task=${task.id}`; return <div className="history-row history-link" role="link" tabIndex="0" title="双击查看任务" onDoubleClick={() => navigate(target)} onKeyDown={(event) => { if (event.key === 'Enter') navigate(target) }} key={task.id}><span><b>{task.tool_name}</b></span><span className="history-task-id" title={task.id}><code>{task.id.slice(0, 10)}</code></span><span><i className={`history-status ${task.status}`} />{task.status}</span><span>{formatTime(task.started_at || task.created_at)}</span><span>{formatTime(task.finished_at) || '—'}</span></div> })}</div> : <EmptyState title="还没有运行记录" message="从任一工具页面启动任务后，记录会出现在这里。" />}</main>
 }
 
 function formatTime(value) { return value ? value.replace('T', ' ') : '' }

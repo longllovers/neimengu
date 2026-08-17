@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
-from . import task_store
+from . import task_logs, task_store
 from .adapters import TaskRuntime, execute, path_value
 from .catalog import TOOL_MAP, public_catalog
 from .repositories import preview_file, repository_tree, safe_path
@@ -87,6 +87,7 @@ class TaskRecord:
             }
             self.next_sequence += 1
             self.events.append(event)
+            task_logs.append_event(self.id, self.tool_name, self.created_at, event)
             snapshot = self.snapshot(include_parameters=True)
         task_store.save_emission(snapshot, event)
 
@@ -98,6 +99,7 @@ class TaskRecord:
                 "started_at": self.started_at, "finished_at": self.finished_at,
                 "result": self.result, "error": self.error,
                 "last_sequence": self.next_sequence - 1,
+                "log_file": task_logs.relative_path(self.id, self.tool_name, self.created_at),
             }
             if include_parameters:
                 data["parameters"] = self.parameters
