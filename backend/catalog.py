@@ -123,6 +123,22 @@ TOOLS += [
         ],
     },
     {
+        "id": "shp-shift", "name": "SHP 坐标偏移", "folder": "shp_shift", "category": "矢量处理", "accent": "blue",
+        "description": "依据原始点与正确位置点计算位移量，整体平移 Shapefile 并保留配套文件。",
+        "showProgress": True,
+        "fields": [
+            field("input_path", "输入 SHP 路径", required=True, help="请选择需要整体偏移的 .shp 文件。", **PATH),
+            field("overwrite", "覆盖原始 SHP", "checkbox", default=False, help="启用后安全替换原始文件；关闭时输出到指定文件夹。", wide=True),
+            field("output_directory", "输出文件夹", requiredWhen=["overwrite", False], visibleWhen=["overwrite", False], help="输出文件名自动与输入 SHP 相同。", **PATH),
+            field("original_x", "原始数据点 X", "number", required=True, step="any"),
+            field("original_y", "原始数据点 Y", "number", required=True, step="any"),
+            field("correct_x", "正确位置点 X", "number", required=True, step="any"),
+            field("correct_y", "正确位置点 Y", "number", required=True, step="any"),
+            field("workers", "并发数", "number", default=16, min=1, max=128),
+            field("batch_size", "每批要素数", "number", default=1000, min=1, max=100000),
+        ],
+    },
+    {
         "id": "shp-compare", "name": "两期 SHP 统计对比", "folder": "两shp-统计-亩数-图斑数", "category": "统计分析", "accent": "blue",
         "description": "按文件名匹配两期成果，对比面积、亩数与图斑数量并导出 CSV。",
         "fields": [field("folder_a", "模型/基准文件夹", default=r"\\10.10.10.11\data\北京预测结果传递\地块结果\所有地块结果最新-去除接边", required=True, **PATH), field("folder_b", "待统计文件夹", required=True, **PATH), field("output_path", "CSV 输出路径", required=True, **PATH), field("workers", "并发数", "number", default=4, min=1, max=32)],

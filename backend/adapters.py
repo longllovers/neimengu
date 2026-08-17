@@ -429,6 +429,33 @@ def run_custom(runtime: TaskRuntime, tool_id: str, payload: dict[str, Any]) -> d
         with output.open("w", encoding="utf-8-sig", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=module.CSV_COLUMNS); writer.writeheader(); writer.writerows(rows)
         return {"rows": len(rows), "output": str(output)}
+    if tool_id == "shp-shift":
+        required(payload, "input_path", "original_x", "original_y", "correct_x", "correct_y")
+        overwrite = bool(payload.get("overwrite"))
+        if not overwrite:
+            required(payload, "output_directory")
+        module = load_module("shp_shift/shp_shift.py", "geo_workbench_shp_shift")
+        source = Path(path_value(payload, "input_path"))
+        output = source if overwrite else Path(path_value(payload, "output_directory")) / source.name
+        original = (float(payload["original_x"]), float(payload["original_y"]))
+        correct = (float(payload["correct_x"]), float(payload["correct_y"]))
+        workers = int(payload.get("workers", 16))
+        batch_size = int(payload.get("batch_size", 1000))
+        if not 1 <= workers <= 128:
+            raise ValueError("并发数必须在 1 到 128 之间")
+        if not 1 <= batch_size <= 100000:
+            raise ValueError("每批要素数必须在 1 到 100000 之间")
+        runtime.log(f"输入文件：{source}")
+        runtime.log(f"输出文件：{output}")
+        runtime.log(f"位移量：dx={correct[0] - original[0]}，dy={correct[1] - original[1]}")
+        result = module.shift_shapefile(
+            source, output, original, correct,
+            mode="process", workers=workers, batch_size=batch_size,
+            progress=lambda values: runtime.emit("progress", values),
+            overwrite=overwrite,
+        )
+        runtime.log(f"偏移完成：{result['features']} 个要素，耗时 {result['elapsed_seconds']:.1f} 秒")
+        return result
     if tool_id == "county-crop":
         required(payload, "input_path", "output_root")
         module = load_module("县作物抽取/app.py", "geo_workbench_county_crop")
@@ -450,7 +477,7 @@ def run_custom(runtime: TaskRuntime, tool_id: str, payload: dict[str, Any]) -> d
     raise ValueError(f"不支持的工具：{tool_id}")
 
 
-CUSTOM_TOOLS = {"topology", "shp-compare", "county-crop", "copy-txt", "shp-to-tif"}
+CUSTOM_TOOLS = {"topology", "shp-compare", "shp-shift", "county-crop", "copy-txt", "shp-to-tif"}
 
 
 def execute(runtime: TaskRuntime, tool: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:

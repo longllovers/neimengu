@@ -198,6 +198,7 @@ function ToolPage({ tool }) {
       <form className="config-panel" onSubmit={submit}>
         <div className="panel-heading"><div><span>01</span><div><h2>任务配置</h2><p>填写服务器可访问的文件路径</p></div></div><span className="saved-note">自动记忆</span></div>
         <div className="form-grid">{tool.fields.filter((field) => matchesCondition(field.visibleWhen, values)).map((field) => <FormField key={field.name} field={field} required={field.required || Boolean(field.requiredWhen && matchesCondition(field.requiredWhen, values))} value={values[field.name]} onChange={(value) => setValues((current) => ({ ...current, [field.name]: value }))} />)}</div>
+        {tool.id === 'shp-shift' && <OffsetPreview values={values} />}
         {formError && <div className="form-error"><XCircle size={16} />{formError}</div>}
         <div className="form-actions"><button className="primary-button" type="submit" disabled={running}><Play size={17} />{running ? '任务运行中' : '开始运行'}</button><button className="stop-button" type="button" onClick={terminate} disabled={!canTerminate}><CircleStop size={17} />{task?.status === 'cancelling' ? '正在终止' : '终止当前任务'}</button></div>
       </form>
@@ -215,12 +216,25 @@ function FormField({ field, value, onChange, required = field.required }) {
   </label>
 }
 
+function OffsetPreview({ values }) {
+  const raw = [values.original_x, values.original_y, values.correct_x, values.correct_y]
+  const complete = raw.every((value) => String(value ?? '').trim() !== '')
+  const points = raw.map(Number)
+  const valid = complete && points.every(Number.isFinite)
+  const dx = valid ? points[2] - points[0] : null
+  const dy = valid ? points[3] - points[1] : null
+  return <div className={`offset-preview ${valid ? 'ready' : ''}`}>
+    <span>位移量预览</span>
+    <b>{valid ? `dx = ${dx.toFixed(6)}　dy = ${dy.toFixed(6)}` : '等待输入两组坐标'}</b>
+  </div>
+}
+
 function TaskPanel({ tool, task, logs, progress }) {
   const status = task?.status || 'idle'
   const statusText = { idle: '等待配置', submitting: '正在提交', queued: '排队中', running: '运行中', cancelling: '正在停止', completed: '已完成', failed: '运行失败', cancelled: '已取消' }[status] || status
   return <section className="run-panel">
     <div className="panel-heading"><div><span>02</span><div><h2>运行状态</h2><p>进度与脚本输出实时同步</p></div></div><span className={`run-status ${status}`}><i />{statusText}</span></div>
-    {tool.featured && <ClipProgress events={progress} />}
+    {(tool.featured || tool.showProgress) && <ClipProgress events={progress} />}
     <div className="terminal-head"><span><TerminalSquare size={15} />终端日志</span><small>{logs.length} 行</small></div>
     <div className="terminal" aria-live="polite">{logs.length ? logs.map((entry, index) => <div className={entry.level || ''} key={`${entry.sequence}-${index}`}><span>{String(index + 1).padStart(3, '0')}</span>{entry.message || ' '}</div>) : <div className="terminal-empty"><TerminalSquare size={25} /><span>任务启动后，日志会显示在这里</span></div>}</div>
     {task?.error && <div className="task-error"><XCircle size={17} />{task.error}</div>}
@@ -232,7 +246,7 @@ function ClipProgress({ events }) {
   const latest = events.at(-1)
   const data = latest ? Object.fromEntries(Object.entries(latest).filter(([key]) => !['sequence', 'type', 'time'].includes(key))) : {}
   const items = Object.entries(data).slice(0, 4)
-  return <div className="clip-progress"><div className="progress-visual"><div className="map-grid"><i /><i /><i /><i /><i /></div><span>{events.length ? `${events.length} 条进度事件` : '等待县级任务计划'}</span></div><div className="progress-stats">{items.length ? items.map(([key, value]) => <div key={key}><small>{key}</small><b>{typeof value === 'object' ? '已更新' : String(value)}</b></div>) : <><div><small>处理县数</small><b>—</b></div><div><small>当前阶段</small><b>待启动</b></div></>}</div></div>
+  return <div className="clip-progress"><div className="progress-visual"><div className="map-grid"><i /><i /><i /><i /><i /></div><span>{events.length ? `${events.length} 条进度事件` : '等待任务进度'}</span></div><div className="progress-stats">{items.length ? items.map(([key, value]) => <div key={key}><small>{key}</small><b>{typeof value === 'object' ? '已更新' : String(value)}</b></div>) : <><div><small>已处理</small><b>—</b></div><div><small>当前阶段</small><b>待启动</b></div></>}</div></div>
 }
 
 function TaskHistory() {
